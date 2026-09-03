@@ -119,6 +119,8 @@ pub fn run() {
             commands::set_opacity,
             commands::app_info,
             commands::quit,
+            commands::minimize_window,
+            commands::close_window,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoteDock");

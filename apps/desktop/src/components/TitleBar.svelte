@@ -10,14 +10,49 @@
     onSwitch: () => void;
     onOpenWeb: () => void;
     onOpenSettings: () => void;
+    onMinimize: () => void;
+    onClose: () => void;
   }
 
-  let { status, pending, loggedIn, canOpenWeb, onCreate, onSwitch, onOpenWeb, onOpenSettings }: Props = $props();
+  let {
+    status,
+    pending,
+    loggedIn,
+    canOpenWeb,
+    onCreate,
+    onSwitch,
+    onOpenWeb,
+    onOpenSettings,
+    onMinimize,
+    onClose,
+  }: Props = $props();
+
+  let contextMenu = $state<{ x: number; y: number } | null>(null);
 
   const statusLabel = $derived(
     status === "synced" ? "已同步" : status === "syncing" ? "同步中" : "离线",
   );
+
+  function openContextMenu(event: MouseEvent): void {
+    event.preventDefault();
+    const menuWidth = 132;
+    const menuHeight = 88;
+    contextMenu = {
+      x: Math.min(event.clientX, Math.max(4, window.innerWidth - menuWidth - 4)),
+      y: Math.min(event.clientY, Math.max(4, window.innerHeight - menuHeight - 4)),
+    };
+  }
+
+  function closeContextMenu(): void {
+    contextMenu = null;
+  }
+
+  function handleKeydown(event: KeyboardEvent): void {
+    if (event.key === "Escape") closeContextMenu();
+  }
 </script>
+
+<svelte:window onclick={closeContextMenu} onkeydown={handleKeydown} />
 
 <!--
   The whole strip is the drag handle (`data-tauri-drag-region`), which is how an
@@ -28,7 +63,7 @@
   button, and the sync dot. Everything else lives behind the settings button —
   in a window that can be 250px wide, a row of six icons is most of the header.
 -->
-<header data-tauri-drag-region>
+<header role="toolbar" tabindex="-1" data-tauri-drag-region oncontextmenu={openContextMenu}>
   <div class="identity" data-tauri-drag-region>
     {#if loggedIn && canOpenWeb}
       <button class="brand-link" aria-label="打开 Web 端" title="打开 Web 端" onclick={onOpenWeb}>NoteDock</button>
@@ -56,6 +91,24 @@
     </div>
   {/if}
 </header>
+
+{#if contextMenu}
+  <div
+    class="context-menu"
+    role="menu"
+    tabindex="-1"
+    style={`left: ${contextMenu.x}px; top: ${contextMenu.y}px;`}
+  >
+    <button role="menuitem" onclick={() => { closeContextMenu(); onMinimize(); }}>
+      <Icon name="minimize" size={15} />
+      <span>最小化</span>
+    </button>
+    <button class="danger" role="menuitem" onclick={() => { closeContextMenu(); onClose(); }}>
+      <Icon name="close" size={15} />
+      <span>关闭</span>
+    </button>
+  </div>
+{/if}
 
 <style>
   header {
@@ -139,6 +192,43 @@
     min-width: 30px;
     color: var(--nd-fg-dim);
   }
+
+  .context-menu {
+    position: fixed;
+    z-index: 30;
+    display: grid;
+    min-width: 132px;
+    padding: 4px;
+    border: 1px solid var(--nd-border-strong);
+    border-radius: var(--nd-radius-sm);
+    background: var(--nd-bg-elev);
+    box-shadow: var(--nd-shadow-lg);
+  }
+
+  .context-menu button {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    min-height: 34px;
+    padding: 0 9px;
+    border: 0;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--nd-fg);
+    font: inherit;
+    font-size: var(--nd-text-xs);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .context-menu button:hover,
+  .context-menu button:focus-visible {
+    background: var(--nd-bg-hover);
+    outline: none;
+  }
+
+  .context-menu button.danger { color: var(--nd-danger); }
 
   @media (max-width: 320px) {
     .status {

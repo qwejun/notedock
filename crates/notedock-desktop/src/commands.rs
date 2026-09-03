@@ -255,6 +255,18 @@ pub fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+#[tauri::command]
+pub fn minimize_window(window: WebviewWindow) -> CmdResult<()> {
+    window
+        .minimize()
+        .map_err(|err| fail("无法最小化窗口", err))
+}
+
+#[tauri::command]
+pub fn close_window(window: WebviewWindow) -> CmdResult<()> {
+    window.close().map_err(|err| fail("无法关闭窗口", err))
+}
+
 /// Names the session in the server's session list. Best-effort: a machine
 /// without a hostname just shows up as a desktop.
 fn hostname_label() -> String {

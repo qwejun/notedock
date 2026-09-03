@@ -41,6 +41,8 @@ export const bridge = {
   setOpacity: (value: number) => invoke<void>("set_opacity", { value }),
   appInfo: () => invoke<AppInfo>("app_info"),
   quit: () => invoke<void>("quit"),
+  minimizeWindow: () => invoke<void>("minimize_window"),
+  closeWindow: () => invoke<void>("close_window"),
 
   onSync: (handler: (state: SyncState) => void): Promise<UnlistenFn> =>
     listen<SyncState>(SYNC_EVENT, (event) => handler(event.payload)),

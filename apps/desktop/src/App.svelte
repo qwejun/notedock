@@ -10,6 +10,7 @@
   import SettingsPanel from "./components/SettingsPanel.svelte";
   import Login from "./components/Login.svelte";
   import { DesktopStore } from "./lib/store.svelte";
+  import { bridge } from "./lib/bridge";
 
   const store = new DesktopStore();
 
@@ -111,6 +112,8 @@
     canOpenWeb={store.sync.logged_in && Boolean(store.sync.server_url)}
     onOpenWeb={() => void store.openWeb()}
     onOpenSettings={() => (settingsOpen = true)}
+    onMinimize={() => void bridge.minimizeWindow()}
+    onClose={() => void bridge.closeWindow()}
   />
 
   {#if store.clickThrough}
