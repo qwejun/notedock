@@ -1,0 +1,77 @@
+name: Package Windows desktop app
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*.*.*"]
+  # So an installer can be produced from any branch without tagging.
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  msi:
+    name: Build the installer
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # `tauri.conf.json` has no `beforeBuildCommand`, so the webview's assets have
+      # to exist on disk before the bundler embeds them.
+      - name: Build the desktop frontend
+        run: pnpm --filter @notedock/desktop build
+
+      - name: Test the desktop crate
+        run: cargo test -p notedock-desktop
+
+      - name: Check the generated contract is current
+        run: git diff --exit-code -- packages/editor/src/generated/
+
+      # Run from the crate: the Tauri CLI locates the project by finding
+      # `tauri.conf.json` in the working directory.
+      - name: Build the installer
+        working-directory: crates/notedock-desktop
+        run: pnpm exec tauri build
+
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: notedock-windows-msi
+          path: target/release/bundle/msi/*.msi
+          if-no-files-found: error
+
+      - name: Attach the installer to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/release/bundle/msi/*.msi
+          generate_release_notes: true

@@ -95,26 +95,43 @@ NOTEDOCK_PORT=18080
 
 数据保存在 Docker volume `notedock-data` 中。升级时再次执行 `pull` 和 `up -d` 即可。
 
-## 自动构建 Docker
+## 自动构建
 
-每次向 GitHub 的 `main` 分支推送代码，都会自动执行：
+仓库里有三条 GitHub Actions 工作流，运行记录都在仓库的 Actions 页面。
 
-1. 构建 Web 前端
-2. 编译服务端
-3. 构建 Docker 镜像
-4. 发布到 GitHub Container Registry
+| 工作流 | 文件 | 触发时机 | 产物 |
+| --- | --- | --- | --- |
+| 检查 | `.github/workflows/ci.yml` | 每次推送和 PR | 无（类型检查 + 服务端测试） |
+| 服务端镜像 | `.github/workflows/docker.yml` | 推送 `main`、打 `v*` 标签 | `ghcr.io/qwejun/notedock:latest` |
+| 桌面端安装包 | `.github/workflows/desktop.yml` | 推送 `main`、打 `v*` 标签、手动触发 | `NoteDock_x.y.z_x64_en-US.msi` |
 
-镜像地址：
+### 下载桌面端安装包
 
-```text
-ghcr.io/qwejun/notedock:latest
+推送到 `main` 之后，在 Actions 页面点开最新一次「Package Windows desktop app」，从 Artifacts 里下载 `notedock-windows-msi`。
+
+打标签时会额外创建一个 GitHub Release，安装包直接挂在 Release 上，不用登录也能下载：
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
-工作流文件在 `.github/workflows/docker.yml`，运行记录可以在 GitHub 仓库的 Actions 页面查看。
+同一个标签也会触发服务端镜像构建，所以桌面端和 NAS 上的服务端版本能对齐。
+
+### 在本机打包
+
+```bash
+pnpm --filter @notedock/desktop build
+cd crates/notedock-desktop && pnpm exec tauri build
+```
+
+安装包在 `target/release/bundle/msi/`。
 
 ## 安全提醒
 
-当前部署按需求使用 HTTP，没有 HTTPS。公网传输的登录令牌和笔记内容没有加密，只建议在开发或可信网络中使用。正式对公网开放时，建议在前面加 Caddy 或 Nginx，再启用 HTTPS。
+当前部署按需求使用 HTTP，没有 HTTPS。**如果你从外网登录 NAS，登录密码、令牌和笔记内容都是明文经过公网的**，路径上的任何一跳都能读到，也能改。这在可信的家庭内网里可以接受，跨网访问则不建议长期这样用。
+
+绿联 UGOS PRO 自带反向代理，成本最低的做法是让它在前面终结 TLS：给域名申请证书，反代到 `notedock` 容器的 8080，然后只对外开放 443。桌面端的 HTTP 客户端用的是 rustls，换成 `https://` 和 `wss://` 不需要改代码。
 
 如果只有公网 IPv6，只有 IPv4 网络的电脑可能无法访问，需要额外提供 IPv4 入口或使用 Cloudflare Tunnel。
 

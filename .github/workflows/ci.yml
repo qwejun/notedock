@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A newer push makes an in-flight run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Type-check and build the clients
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Type-check
+        run: pnpm -r check
+
+      - name: Build
+        run: pnpm -r build
+
+  rust:
+    name: Test the server
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # `notedock-desktop` needs the Tauri system libraries, so it is tested on
+      # Windows by the packaging workflow instead. What runs here is everything
+      # the NAS image contains.
+      - name: Test
+        run: cargo test -p notedock-api -p notedock-server
+
+      # ts-rs rewrites the TypeScript contract during that run. It is committed so
+      # the browser client can be built without a Rust toolchain, which only stays
+      # honest while the two agree.
+      - name: Check the generated contract is current
+        run: git diff --exit-code -- packages/editor/src/generated/api.ts
