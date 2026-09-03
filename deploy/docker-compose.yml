@@ -14,10 +14,8 @@
 
 services:
   notedock:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile
-    image: notedock-server:0.1.0
+    # Published by GitHub Actions; NAS deployments pull this image directly.
+    image: ghcr.io/qwejun/notedock:latest
     restart: unless-stopped
     environment:
       # Required. Argon2 PHC string; the server refuses to start without it.

@@ -86,10 +86,9 @@ pnpm -r check                          # svelte-check
 见 [deploy/docker-compose.yml](deploy/docker-compose.yml)。先生成密码哈希，再启动：
 
 ```bash
-docker compose run --rm --entrypoint notedock-server notedock hash-password '你的密码'
+docker compose -f deploy/docker-compose.yml pull
+docker compose -f deploy/docker-compose.yml run --rm --entrypoint notedock-server notedock hash-password '你的密码'
 # 把输出写进 deploy/.env 的 NOTEDOCK_PASSWORD_HASH
-pnpm install --frozen-lockfile
-pnpm --filter @notedock/web build       # 生成服务端托管的同源浏览器端
 docker compose -f deploy/docker-compose.yml up -d
 ```
 
