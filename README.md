@@ -1,116 +1,142 @@
 # NoteDock
 
-Windows 悬浮记事本 + NAS 服务端 + 浏览器管理端。桌面端是主要入口，笔记集中存在 NAS 上，
-浏览器可以远程编辑，断网时桌面端照常编辑、联网后自动同步。
+NoteDock 是一个放在 Windows 桌面上的悬浮记事本。
 
-## 结构
+笔记保存在 NAS 服务端，电脑上的桌面窗口和浏览器都可以打开、编辑。电脑暂时断网时也能继续写，网络恢复后会自动同步。
+
+## 现在能做什么
+
+- Windows 桌面悬浮窗口，随时打开记录内容
+- 笔记有独立的标题和正文，可以新建、切换、搜索
+- 浏览器访问 Web 端，远程查看和编辑笔记
+- 桌面端和 Web 端使用同一份数据
+- 断网时可以继续编辑，联网后自动同步
+- 支持窗口置顶、透明度、点击穿透和桌面置顶某一篇笔记
+- 支持基础文字格式：标题、粗体、斜体、删除线、列表、引用、文字颜色和高亮
+- 登录信息保存在本机，不需要每次启动都重新登录
+
+## 项目目录
 
 ```text
-crates/notedock-api       HTTP 契约的唯一真相源；cargo test 会生成 TypeScript 镜像
-crates/notedock-server    NAS 服务端（Axum + SQLite）
-crates/notedock-desktop   桌面端的 Rust 侧（Tauri 2）：本地库、同步、凭据
-packages/editor           两端共用的 Svelte 5 + TipTap 编辑器与设计令牌
-apps/web                  浏览器管理端
-apps/desktop              悬浮窗界面
-deploy/                   Dockerfile 与 compose
+apps/desktop                 Windows 桌面端界面
+apps/web                     浏览器 Web 端
+packages/editor              桌面端和 Web 端共用的编辑器
+crates/notedock-server       NAS 上运行的服务端
+crates/notedock-desktop      Windows 桌面端的 Rust 部分
+crates/notedock-api          前后端共用的数据定义
+deploy                       Docker 镜像和 compose 配置
 ```
 
-三个约定支撑起这套结构：
+## 在电脑上开发
 
-- **契约由 Rust 定义。** `notedock-api` 里的类型经 `ts-rs` 导出到
-  `packages/editor/src/generated/`，服务端、桌面端和两个前端读同一份定义。
-- **编辑器只写一次。** `packages/editor` 以源码形式被两个应用的 Vite 直接编译，
-  没有中间构建产物，也就没有两端行为漂移的空间。
-- **桌面端不在 webview 里联网。** 所有 HTTP 都走 Rust，令牌不进 JavaScript，
-  Tauri 的 CSP 保持关闭外部来源。
-
-## 同步模型
-
-服务端给每篇笔记一个单调递增的 `rev`，并把每次写入追加到全局变更日志 `note_changes`，
-客户端记住看到过的最大 `seq` 作为游标增量拉取。写入时带上 `base_rev`：不匹配就返回 409，
-客户端保留服务端版本、把本地改动另存为「冲突副本」——不合并、不丢弃，由人决定。
-
-桌面端本地库里 `dirty = 1` 就是发件箱，`rev = 0` 表示这篇笔记还没到过服务端（离线新建），
-需要 POST 而不是 PUT。离线新建的笔记自带客户端分配的 UUID，所以断线重传不会产生重复。
-
-## 开发
-
-本机 `cargo` 和 `pnpm` 都不在 PATH，需要全路径（构建脚本会调用 `rustc`，所以要把
-toolchain 的 `bin` 加进 PATH，而不只是用 cargo 的全路径）：
-
-```bash
-export PATH="$HOME/.rustup/toolchains/stable-x86_64-pc-windows-msvc/bin:$PATH"
-export PATH="$HOME/.workbuddy/pnpm-bin:$PATH"
-export NODE_OPTIONS="--use-system-ca"   # 绕开注入的 safe-delete 钩子
-```
+需要先安装 Node.js、pnpm、Rust 和 Docker（Docker 只在本地跑服务端时需要）。
 
 ```bash
 pnpm install
-
-# 服务端（NOTEDOCK_PASSWORD 只用于本机开发；部署用 NOTEDOCK_PASSWORD_HASH）
-NOTEDOCK_PASSWORD='dev-password-123' NOTEDOCK_BIND='127.0.0.1:8080' \
-  NOTEDOCK_DB='data/dev.db' cargo run -p notedock-server
-
-pnpm --filter @notedock/web dev        # 浏览器端 :5173，API 由 Vite 代理到 :8080
-pnpm --filter @notedock/desktop dev    # 悬浮窗界面 :5174
-cargo run -p notedock-desktop          # 悬浮窗本体（读上面的 :5174）
-
-cargo test --workspace                 # 含契约生成与服务端集成测试
-pnpm -r check                          # svelte-check
 ```
 
-改动 `crates/notedock-api` 后跑 `cargo test -p notedock-api` 重新生成 TypeScript。
-
-## 快捷键
-
-| 快捷键 | 作用 |
-|---|---|
-| Ctrl+P | 搜索并切换笔记 |
-| Ctrl+N | 新建笔记（桌面端） |
-| Ctrl+S | 立即保存（平时自动保存） |
-| Ctrl+, | 打开设置（桌面端） |
-| Ctrl+Shift+K | 开关点击穿透（桌面端） |
-
-格式化没有常驻工具栏：选中文字才浮现气泡条。
-
-悬浮窗的标题栏只有三样东西：笔记标题、一个设置按钮、一个同步状态圆点。不透明度、
-窗口置顶、点击穿透、桌面置顶、服务器信息、版本与数据目录都在设置面板里。
-不透明度和窗口置顶会写进 `settings.json`，下次启动保持原样；点击穿透故意不持久化——
-一个启动就穿透的窗口是个陷阱。
-
-## 部署
-
-见 [deploy/docker-compose.yml](deploy/docker-compose.yml)。先生成密码哈希，再启动：
+启动本地服务端：
 
 ```bash
-docker compose -f deploy/docker-compose.yml pull
-docker compose -f deploy/docker-compose.yml run --rm --entrypoint notedock-server notedock hash-password '你的密码'
-# 把输出写进 deploy/.env 的 NOTEDOCK_PASSWORD_HASH
-docker compose -f deploy/docker-compose.yml up -d
+NOTEDOCK_PASSWORD=dev-password-123 \
+NOTEDOCK_BIND=127.0.0.1:8080 \
+NOTEDOCK_DB=data/dev.db \
+cargo run -p notedock-server
 ```
 
-只发布应用端口，数据库和文件系统不暴露。
-
-推送到 GitHub `main` 后，`.github/workflows/docker.yml` 会自动构建完整的
-浏览器端和服务端镜像，并发布到 `ghcr.io/qwejun/notedock:latest`。NAS 上可以直接使用：
+启动 Web 端：
 
 ```bash
-docker pull ghcr.io/qwejun/notedock:latest
+pnpm --filter @notedock/web dev
 ```
 
-## 第一阶段的两个已知限制
+启动桌面端界面：
 
-**纯 HTTP。** 登录令牌和笔记正文明文过公网，同链路可嗅探。密码本身不会被存储或传输明文
-比对（服务端只有 Argon2 哈希），但传输层没有加密。
+```bash
+pnpm --filter @notedock/desktop dev
+```
 
-浏览器端的截图粘贴仍然可用——它走 `paste` 事件而不是 `navigator.clipboard.read()`，
-后者需要安全上下文。反过来，「复制为富文本」在纯 HTTP 下不可用。
-compose 里放开注释里的 Caddy 服务即可开启 HTTPS，应用代码不需要改。
+常用检查：
 
-**IPv6-only 可达性。** 只有公网 IPv6 域名时，IPv4-only 的网络打不开浏览器端。
-这不是配置问题；需要 Cloudflare Tunnel 之类的 IPv4 入口。
+```bash
+cargo test --workspace
+pnpm -r check
+```
 
-## 还没做
+## 部署到 NAS
 
-图片与附件上传（契约已留好 `/blobs` 位置）、WebSocket 实时推送、全文搜索、
-V1 数据导入、标签与文件夹。
+NAS 上只需要 Docker。镜像会由 GitHub Actions 自动构建并发布，不需要在 NAS 上安装 Rust 或 Node.js。
+
+先下载项目：
+
+```bash
+git clone https://github.com/qwejun/notedock.git
+cd notedock
+```
+
+生成登录密码的哈希：
+
+```bash
+docker compose -f deploy/docker-compose.yml run --rm \
+  --entrypoint notedock-server notedock \
+  hash-password '换成你自己的密码'
+```
+
+在 `deploy/.env` 中写入生成的结果：
+
+```env
+NOTEDOCK_PASSWORD_HASH=这里填上面生成的整串内容
+```
+
+启动服务：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml pull
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+```
+
+默认端口是 `8080`，浏览器打开：
+
+```text
+http://你的IPv6域名:8080
+```
+
+也可以在 `deploy/.env` 里修改端口：
+
+```env
+NOTEDOCK_PORT=18080
+```
+
+数据保存在 Docker volume `notedock-data` 中。升级时执行：
+
+```bash
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml pull
+docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
+```
+
+## 自动构建 Docker
+
+每次向 GitHub 的 `main` 分支推送代码，都会自动执行：
+
+1. 构建 Web 前端
+2. 编译服务端
+3. 构建 Docker 镜像
+4. 发布到 GitHub Container Registry
+
+镜像地址：
+
+```text
+ghcr.io/qwejun/notedock:latest
+```
+
+工作流文件在 `.github/workflows/docker.yml`，运行记录可以在 GitHub 仓库的 Actions 页面查看。
+
+## 安全提醒
+
+当前部署按需求使用 HTTP，没有 HTTPS。公网传输的登录令牌和笔记内容没有加密，只建议在开发或可信网络中使用。正式对公网开放时，建议在前面加 Caddy 或 Nginx，再启用 HTTPS。
+
+如果只有公网 IPv6，只有 IPv4 网络的电脑可能无法访问，需要额外提供 IPv4 入口或使用 Cloudflare Tunnel。
+
+## 目前还没完成
+
+图片和附件上传、全文搜索、标签和文件夹、笔记导入等功能还在后续开发中。
