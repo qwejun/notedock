@@ -1,61 +1,15 @@
-# NoteDock on the NAS.
-#
-# Only the application port is published: the database is a file inside the
-# container's volume and is never reachable from the network.
-#
-#   1. Start the container.
-#   2. Open the Web page and set the password on first launch.
-#
-# The first-stage deployment is plain HTTP by design. See the commented-out Caddy
-# service at the bottom for turning on TLS, which is the only change needed —
-# nothing in the application assumes cleartext.
-
 services:
   notedock:
-    # Published by GitHub Actions; NAS deployments pull this image directly.
     image: ghcr.io/qwejun/notedock:latest
-    # UGOS PRO x86 uses the amd64 Docker platform.
     platform: linux/amd64
     container_name: notedock
     restart: unless-stopped
     environment:
-      NOTEDOCK_SESSION_TTL_DAYS: ${NOTEDOCK_SESSION_TTL_DAYS:-30}
-      # Same-origin in production: the server hands out the browser client
-      # itself, so no cross-origin request ever happens.
       NOTEDOCK_WEB_DIR: /srv/web
-      NOTEDOCK_CORS_ORIGINS: ${NOTEDOCK_CORS_ORIGINS:-}
     volumes:
       - notedock-data:/data
     ports:
-      # Publish on the host's default interfaces so local IPv4 (127.0.0.1),
-      # IPv6, and a public IPv6 domain can all reach the same service.
       - "${NOTEDOCK_PORT:-8080}:8080"
-    healthcheck:
-      # The runtime image includes curl specifically for this health check.
-      # Checking the endpoint catches both a dead listener and a failed router.
-      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
 
 volumes:
   notedock-data:
-
-# Turning on HTTPS, once a domain resolves to this host:
-#
-#   caddy:
-#     image: caddy:2-alpine
-#     restart: unless-stopped
-#     ports: ["[::]:443:443", "[::]:80:80"]
-#     volumes:
-#       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-#       - caddy-data:/data
-#
-# Caddyfile:
-#   notes.example.com {
-#     reverse_proxy notedock:8080
-#   }
-#
-# Then drop the `ports` block above so 8080 is only reachable from Caddy. That
-# also restores the browser's clipboard API, which needs a secure context.
