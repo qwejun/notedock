@@ -19,7 +19,9 @@ services:
     restart: unless-stopped
     environment:
       # Required. Argon2 PHC string; the server refuses to start without it.
-      NOTEDOCK_PASSWORD_HASH: ${NOTEDOCK_PASSWORD_HASH:?set NOTEDOCK_PASSWORD_HASH in .env}
+      # Empty is allowed only so the one-shot hash-password command can run
+      # before .env exists; the server refuses to start without a real hash.
+      NOTEDOCK_PASSWORD_HASH: ${NOTEDOCK_PASSWORD_HASH:-}
       NOTEDOCK_SESSION_TTL_DAYS: ${NOTEDOCK_SESSION_TTL_DAYS:-30}
       # Same-origin in production: the server hands out the browser client
       # itself, so no cross-origin request ever happens.
