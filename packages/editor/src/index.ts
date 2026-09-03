@@ -7,6 +7,7 @@
  */
 
 export { default as NoteEditor } from "./components/NoteEditor.svelte";
+export { default as NoteTitle } from "./components/NoteTitle.svelte";
 export { default as BubbleToolbar } from "./components/BubbleToolbar.svelte";
 export { default as CommandPalette } from "./components/CommandPalette.svelte";
 export { default as SyncDot } from "./components/SyncDot.svelte";
@@ -16,7 +17,7 @@ export type { PaletteItem, SyncStatus } from "./lib/types";
 
 export { ApiError, NetworkError, NoteDockClient } from "./lib/api";
 export { NoteProvider, type ConnectionState } from "./lib/provider";
-export { FRAGMENT, NoteSession, type SessionOptions } from "./lib/session";
+export { FRAGMENT, META, NoteSession, TITLE_KEY, type SessionOptions } from "./lib/session";
 export {
   countWords,
   createNoteEditor,

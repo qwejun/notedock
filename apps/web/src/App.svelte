@@ -6,6 +6,7 @@
     countWords,
     Icon,
     NoteEditor,
+    NoteTitle,
     SyncDot,
     type PaletteItem,
   } from "@notedock/editor";
@@ -96,15 +97,7 @@
       {/if}
 
       {#if store.session}
-        <input
-          class="note-title"
-          type="text"
-          aria-label="笔记标题"
-          placeholder="标题"
-          maxlength="200"
-          value={store.title}
-          oninput={(event) => store.renameTitle(event.currentTarget.value)}
-        />
+        <NoteTitle value={store.title} onInput={(title) => store.renameTitle(title)} />
         <NoteEditor
           session={store.session}
           placeholder="输入笔记内容…"
@@ -203,22 +196,13 @@
     min-height: 0;
   }
 
-  .note-title {
-    flex: none;
-    width: 100%;
+  .shell :global(.nd-note-title) {
     height: 52px;
     padding: 0 calc(var(--nd-space) * 5);
-    border: 0;
     border-bottom: 1px solid var(--nd-border);
-    background: transparent;
-    color: var(--nd-fg);
-    font: inherit;
     font-size: var(--nd-text-lg);
     font-weight: 600;
-    outline: none;
   }
-
-  .note-title::placeholder { color: var(--nd-fg-faint); }
 
   .blank {
     display: flex;

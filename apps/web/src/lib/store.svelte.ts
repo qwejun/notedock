@@ -138,10 +138,11 @@ export class NotesStore {
         b.updated_at.localeCompare(a.updated_at),
       );
 
-      // The open note's title is derived server-side, so it arrives here too.
       const open = this.selectedId ? byId.get(this.selectedId) : undefined;
-      if (open) this.title = open.title;
-      else if (this.selectedId) this.#close(); // deleted elsewhere
+      // An open note's title is driven by its live Yjs document. The metadata
+      // list is eventually consistent, so copying `open.title` here can briefly
+      // replace a freshly typed title with the previous, stale value.
+      if (!open && this.selectedId) this.#close(); // deleted elsewhere
 
       this.status = "synced";
     } catch (error) {
@@ -153,24 +154,24 @@ export class NotesStore {
     if (id === this.selectedId) return;
     this.#close();
 
+    // A note created from a name is already in the list under that name by now, so
+    // `seedTitle` only covers the window where it is not. Whether the *document*
+    // adopts it is the session's call: one write path for the title, which is what
+    // keeps two clients from each contributing their own copy of it.
+    const title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
+
     const session = new NoteSession({
       noteId: id,
       cacheKey: `notedock:${id}`,
       ticket: () => this.#client.socketUrl(),
       onState: (state) => this.#onConnection(state),
-      initialTitle: this.notes.find((note) => note.id === id)?.title ?? seedTitle,
-      onTitle: (title) => (this.title = title),
+      initialTitle: title,
+      onTitle: (next) => (this.title = next),
     });
-
-    // A note created from a name starts with that name as its first line, which
-    // is also what the server derives the title from.
-    if (seedTitle) {
-      void session.whenReady().then(() => session.seedTitle(seedTitle));
-    }
 
     this.selectedId = id;
     this.session = session;
-    this.title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
+    this.title = title;
   }
 
   async setup(password: string): Promise<void> {

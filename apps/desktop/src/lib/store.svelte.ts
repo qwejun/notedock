@@ -117,13 +117,22 @@ export class DesktopStore {
       if (next) this.open(next.id);
       return;
     }
-    // The title is derived server-side from the document, so it arrives here.
-    this.title = summary.title;
+    // An open note's title is driven by its live Yjs document. The metadata list
+    // is eventually consistent (the server materializes it on a timer), so
+    // copying the summary here can briefly replace a freshly typed title with
+    // the previous, still-stale value.
+    if (!this.session) this.title = summary.title;
   }
 
   open(id: string, seedTitle = ""): void {
     if (id === this.selectedId) return;
     this.#close();
+
+    // By the time a palette-created note is opened it is already in the list with
+    // the name it was given, so `seedTitle` is only the fallback for the window
+    // where it is not. Either way the session decides whether the *document*
+    // adopts it — there is deliberately one write path for the title.
+    const title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
 
     const session = new NoteSession({
       noteId: id,
@@ -132,19 +141,13 @@ export class DesktopStore {
       cacheKey: `notedock:${id}`,
       ticket: () => bridge.wsUrl(),
       onState: (state) => (this.connection = state),
-      initialTitle: this.notes.find((note) => note.id === id)?.title ?? seedTitle,
-      onTitle: (title) => (this.title = title),
+      initialTitle: title,
+      onTitle: (next) => (this.title = next),
     });
-
-    // A note named from the palette starts with that name as its first line,
-    // which is also what the server derives the title from.
-    if (seedTitle) {
-      void session.whenReady().then(() => session.seedTitle(seedTitle));
-    }
 
     this.selectedId = id;
     this.session = session;
-    this.title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
+    this.title = title;
   }
 
   renameTitle(title: string): void {

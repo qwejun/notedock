@@ -11,6 +11,14 @@ import { NoteProvider, type ConnectionState } from "./provider";
  */
 export const FRAGMENT = "default";
 
+/**
+ * Map of the note's own metadata, and the key inside it holding the title.
+ *
+ * Must match `notedock_server::ydoc::{META, TITLE}`.
+ */
+export const META = "meta";
+export const TITLE_KEY = "title";
+
 export interface SessionOptions {
   noteId: string;
   /** Fetches a fresh single-use WebSocket URL. See {@link NoteProvider}. */
@@ -21,7 +29,10 @@ export interface SessionOptions {
    */
   cacheKey?: string;
   onState?: (state: ConnectionState) => void;
-  /** Initial metadata title and live title updates from this Y.Doc. */
+  /**
+   * Title from the metadata list. Shown immediately, and adopted into the
+   * document once the server has confirmed the document has no title of its own.
+   */
   initialTitle?: string;
   onTitle?: (title: string) => void;
 }
@@ -42,16 +53,19 @@ export class NoteSession {
   #cache: IndexeddbPersistence | null = null;
   /** Resolves once the local cache has been read, if there is one. */
   #ready: Promise<void>;
-  #title: Y.Text;
+  #meta: Y.Map<unknown>;
   #onTitle?: (title: string) => void;
-  #titleObserver: () => void;
+  #metaObserver: (event: Y.YMapEvent<unknown>) => void;
+  #destroyed = false;
 
   constructor(options: SessionOptions) {
     this.noteId = options.noteId;
-    this.#title = this.doc.getText("title");
+    this.#meta = this.doc.getMap(META);
     this.#onTitle = options.onTitle;
-    this.#titleObserver = () => this.#onTitle?.(this.title);
-    this.#title.observe(this.#titleObserver);
+    this.#metaObserver = (event) => {
+      if (event.keysChanged.has(TITLE_KEY)) this.#onTitle?.(this.title);
+    };
+    this.#meta.observe(this.#metaObserver);
 
     if (options.cacheKey) {
       const cache = new IndexeddbPersistence(options.cacheKey, this.doc);
@@ -68,13 +82,25 @@ export class NoteSession {
       onState: options.onState,
     });
 
+    const initial = options.initialTitle?.trim() ?? "";
+
+    // Showing the metadata title costs nothing and writes nothing. Worth doing
+    // separately from adopting it, because a note that has a name should not sit
+    // under an empty header while the socket comes up.
     void this.#ready.then(() => {
-      if (!this.title && options.initialTitle?.trim()) {
-        this.setTitle(options.initialTitle);
-      } else {
-        this.#onTitle?.(this.title || options.initialTitle?.trim() || "");
-      }
+      if (!this.#destroyed) this.#onTitle?.(this.title || initial);
     });
+
+    // Adopting it into the document has to wait for the *server*, not the cache.
+    // `#ready` only covers IndexedDB, so a client opening a note it had never
+    // cached found no title, wrote the one from the list, and then received the
+    // server's own copy — two independent values for one field, which is how
+    // "blender学习" came back as "blender学习blender学习".
+    if (initial) {
+      void this.#provider.whenSynced().then(() => {
+        if (!this.#destroyed && !this.title) this.setTitle(initial);
+      });
+    }
   }
 
   /** The XML fragment TipTap's Collaboration extension binds to. */
@@ -96,36 +122,28 @@ export class NoteSession {
   }
 
   get title(): string {
-    return this.#title.toString();
-  }
-
-  setTitle(value: string): void {
-    const next = value.replace(/[\r\n]+/g, " ").slice(0, 200);
-    if (next === this.title) return;
-    this.doc.transact(() => {
-      this.#title.delete(0, this.#title.length);
-      if (next) this.#title.insert(0, next);
-    });
-  }
-
-  /** True when the document has no content at all, cache included. */
-  isEmpty(): boolean {
-    return this.fragment.length === 0;
+    const value = this.#meta.get(TITLE_KEY);
+    return typeof value === "string" ? value : "";
   }
 
   /**
-   * Seeds a brand new note with a heading.
+   * Renames the note.
    *
-   * Guarded by {@link isEmpty} because seeding twice would duplicate the line:
-   * two devices creating the same note offline both think they are first, and
-   * Yjs would faithfully keep both copies.
+   * One map entry, replaced whole, rather than a collaborative string. Two
+   * devices renaming at once therefore settle on one of the two names instead of
+   * interleaving them, and — the reason this changed — a title can no longer end
+   * up written twice: concurrent inserts into a shared `Y.Text` both survive by
+   * design, which for a 200-character field is a bug rather than a feature.
    */
-  seedTitle(text: string): void {
-    if (!this.title) this.setTitle(text.trim());
+  setTitle(value: string): void {
+    const next = value.replace(/[\r\n]+/g, " ").slice(0, 200);
+    if (next === this.title) return;
+    this.#meta.set(TITLE_KEY, next);
   }
 
   destroy(): void {
-    this.#title.unobserve(this.#titleObserver);
+    this.#destroyed = true;
+    this.#meta.unobserve(this.#metaObserver);
     this.#provider.destroy();
     void this.#cache?.destroy();
     this.doc.destroy();

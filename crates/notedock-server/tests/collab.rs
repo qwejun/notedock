@@ -15,7 +15,7 @@ use tokio_tungstenite::{tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use yrs::{
     types::xml::{XmlElementPrelim, XmlFragment, XmlTextPrelim},
     updates::{decoder::Decode, encoder::Encode},
-    Doc, ReadTxn, StateVector, Transact, Update,
+    Doc, Map, ReadTxn, StateVector, Transact, Update,
 };
 
 /// Frame tags, mirroring `notedock_server::ws`.
@@ -24,6 +24,9 @@ const MSG_DIFF: u8 = 2;
 const MSG_UPDATE: u8 = 3;
 
 const PASSWORD: &str = "collab-test-password";
+
+/// Longest a client here will wait for a frame before declaring the server stuck.
+const RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 struct Server {
     base: String,
@@ -147,12 +150,15 @@ impl Client {
     }
 
     /// Reads one frame and folds it into the local document. Returns the tag.
+    ///
+    /// Bounded, because the failure mode of a collaboration bug is silence: an
+    /// unbounded `next().await` turns "the server never answered" into a test run
+    /// that hangs until the harness gives up, with nothing to point at.
     async fn recv(&mut self) -> u8 {
         loop {
-            let message = self
-                .socket
-                .next()
+            let message = tokio::time::timeout(RECV_TIMEOUT, self.socket.next())
                 .await
+                .expect("the server should answer within 10s")
                 .expect("stream open")
                 .expect("frame");
             if let Message::Binary(bytes) = message {
@@ -182,6 +188,14 @@ impl Client {
         paragraph.push_back(&mut txn, XmlTextPrelim::new(text));
     }
 
+    /// Names the note the way `NoteSession.setTitle` does: one map entry, replaced
+    /// whole.
+    fn set_title(&mut self, title: &str) {
+        let meta = self.doc.get_or_insert_map(ydoc::META);
+        let mut txn = self.doc.transact_mut();
+        meta.insert(&mut txn, ydoc::TITLE, title);
+    }
+
     /// Sends the whole local state. Yjs updates are idempotent, so re-sending what
     /// the peer already has is a no-op — which saves tracking its state vector.
     async fn push_all(&mut self) {
@@ -205,6 +219,10 @@ impl Client {
 
     fn text(&self) -> String {
         ydoc::plain_text(&self.doc)
+    }
+
+    fn title(&self) -> String {
+        ydoc::title(&self.doc)
     }
 
     async fn close(mut self) {
@@ -325,4 +343,66 @@ async fn the_server_derives_the_title_from_the_document() {
         note["rev"].as_i64().unwrap() > 1,
         "materializing counts as a metadata change"
     );
+}
+
+/// The regression this exists for: a title that arrived twice.
+///
+/// Two clients open the same note, neither having seen the other's rename, and both
+/// write a title. As a shared string that is not a conflict Yjs is allowed to
+/// resolve — both inserts are legitimate and both survive, so one name became
+/// "blender学习blender学习". As a map entry the same race has exactly one winner,
+/// and the pair still converge.
+#[tokio::test(flavor = "multi_thread")]
+async fn concurrent_renames_leave_exactly_one_title() {
+    let server = Server::start().await;
+    let id = server.create_note("未命名").await;
+
+    // Both connect before either renames, so neither rename can be causally after
+    // the other — the only way to make this a genuine concurrent write.
+    let mut a = server.connect(&id).await;
+    a.handshake().await;
+    let mut b = server.connect(&id).await;
+    b.handshake().await;
+    assert_eq!(
+        b.title(),
+        "未命名",
+        "the name the note was created under is bootstrapped into the document"
+    );
+
+    a.set_title("blender学习");
+    a.push_all().await;
+    a.barrier().await;
+
+    // B's rename never saw A's; its own barrier is what brings A's back.
+    b.set_title("blender 笔记");
+    b.push_all().await;
+    b.barrier().await;
+
+    // A hears about B's from the room, unasked.
+    a.recv().await;
+
+    let title = a.title();
+    assert_eq!(title, b.title(), "both clients settle on the same title");
+    assert!(
+        title == "blender学习" || title == "blender 笔记",
+        "the winner is one of the two names, not both concatenated: {title:?}"
+    );
+
+    a.close().await;
+    b.close().await;
+
+    // And the list agrees: `ydoc::title` reads the same field the clients wrote.
+    let note = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let note = server.note(&id).await;
+            if note["title"] == json!(title) {
+                return note;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("the note should be listed as {title:?} within 5s"));
+
+    assert_eq!(note["title"], json!(title));
 }

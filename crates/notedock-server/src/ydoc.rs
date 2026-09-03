@@ -10,12 +10,20 @@ use notedock_api::text;
 use yrs::{
     types::xml::{XmlElementPrelim, XmlFragment, XmlOut, XmlTextPrelim},
     updates::decoder::Decode,
-    Doc, GetString, ReadTxn, Text, Transact, Update, XmlFragmentRef,
+    Doc, GetString, Map, ReadTxn, Transact, Update, XmlFragmentRef,
 };
 
 /// Root name `y-prosemirror` uses, and therefore what TipTap's Collaboration
 /// extension writes into by default.
 pub const ROOT: &str = "default";
+
+/// Map of the note's own metadata, and the key inside it holding the title.
+///
+/// A map entry rather than a shared string, and not for brevity: concurrent
+/// inserts into a `Y.Text` are *both* kept, which is right for prose and wrong for
+/// a name — two clients each writing "blender学习" produced "blender学习" twice. As
+/// a map entry the same race resolves to one of the two values.
+pub const META: &str = "meta";
 pub const TITLE: &str = "title";
 
 /// Builds a document by replaying stored updates in order.
@@ -38,7 +46,11 @@ pub fn replay(updates: &[Vec<u8>]) -> anyhow::Result<Doc> {
 pub fn from_legacy_text(body: &str, title: &str) -> Doc {
     let doc = Doc::new();
     {
+        // Both roots are resolved before the transaction opens: `get_or_insert_*`
+        // takes the document's write lock itself, so reaching for one while a
+        // `TransactionMut` is alive deadlocks against it.
         let root = doc.get_or_insert_xml_fragment(ROOT);
+        let meta = doc.get_or_insert_map(META);
         let mut txn = doc.transact_mut();
         for line in body.split('\n') {
             let paragraph = root.push_back(&mut txn, XmlElementPrelim::empty("paragraph"));
@@ -47,8 +59,7 @@ pub fn from_legacy_text(body: &str, title: &str) -> Doc {
             }
         }
         if !title.trim().is_empty() {
-            let text = doc.get_or_insert_text(TITLE);
-            text.insert(&mut txn, 0, title.trim());
+            meta.insert(&mut txn, TITLE, title.trim());
         }
     }
     doc
@@ -57,16 +68,25 @@ pub fn from_legacy_text(body: &str, title: &str) -> Doc {
 /// Newline-separated plain text, matching what [`text::plain_text`] produces for
 /// the equivalent JSON document.
 pub fn plain_text(doc: &Doc) -> String {
-    let root = doc.get_or_insert_xml_fragment(ROOT);
     let txn = doc.transact();
     let mut out = String::new();
-    walk_children(&txn, &root, &mut out);
+    // Absent until a client writes into it, which is the normal state of a note
+    // created from the palette and not yet typed into.
+    if let Some(root) = txn.get_xml_fragment(ROOT) {
+        walk_children(&txn, &root, &mut out);
+    }
     text::tidy(&out)
 }
 
+/// The title a client set, or empty when it never set one — in which case the
+/// caller falls back to deriving it from the first line of the body.
 pub fn title(doc: &Doc) -> String {
-    let value = doc.get_or_insert_text(TITLE);
-    value.get_string(&doc.transact()).trim().to_owned()
+    let txn = doc.transact();
+    txn.get_map(META)
+        .and_then(|meta| meta.get(&txn, TITLE))
+        .and_then(|value| value.cast::<String>().ok())
+        .map(|value| value.trim().to_owned())
+        .unwrap_or_default()
 }
 
 fn walk_children<T: ReadTxn>(txn: &T, fragment: &XmlFragmentRef, out: &mut String) {

@@ -4,6 +4,7 @@
   import {
     CommandPalette,
     NoteEditor,
+    NoteTitle,
     type PaletteItem,
   } from "@notedock/editor";
   import TitleBar from "./components/TitleBar.svelte";
@@ -138,15 +139,7 @@
       onSubmit={signIn}
     />
   {:else if store.session}
-    <input
-      class="note-title"
-      type="text"
-      aria-label="笔记标题"
-      placeholder="标题"
-      maxlength="200"
-      value={store.title}
-      oninput={(event) => store.renameTitle(event.currentTarget.value)}
-    />
+    <NoteTitle value={store.title} onInput={(title) => store.renameTitle(title)} />
     <NoteEditor
       session={store.session}
       placeholder="输入笔记内容…"
@@ -199,23 +192,15 @@
     background: var(--nd-bg-solid);
   }
 
-  .note-title {
-    flex: none;
-    width: 100%;
+  .window :global(.nd-note-title) {
     height: 72px;
     padding: 19px calc(var(--nd-space) * 5) 11px;
-    border: 0;
     border-bottom: 1px solid var(--nd-border);
     background: var(--nd-bg-solid);
-    color: var(--nd-fg);
-    font: inherit;
     font-size: 21px;
     font-weight: 700;
     letter-spacing: 0;
-    outline: none;
   }
-
-  .note-title::placeholder { color: var(--nd-fg-faint); }
 
   .hint,
   .banner {

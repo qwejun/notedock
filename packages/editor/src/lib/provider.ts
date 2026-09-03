@@ -46,6 +46,10 @@ export class NoteProvider {
   #destroyed = false;
   #state: ConnectionState = "connecting";
 
+  /** Resolves on the server's first diff. See {@link whenSynced}. */
+  #synced: Promise<void>;
+  #markSynced: (() => void) | null = null;
+
   /**
    * Relays a local edit to the server.
    *
@@ -61,6 +65,7 @@ export class NoteProvider {
 
   constructor(options: ProviderOptions) {
     this.#options = options;
+    this.#synced = new Promise((resolve) => (this.#markSynced = resolve));
     options.doc.on("update", this.#onLocalUpdate);
     // The provider starts in `connecting`; publish that initial state too.
     // Without this first notification, hosts that initialize their own state to
@@ -71,6 +76,20 @@ export class NoteProvider {
 
   get state(): ConnectionState {
     return this.#state;
+  }
+
+  /**
+   * Resolves once the server has answered this document's state vector, i.e. once
+   * the local doc holds everything the server had.
+   *
+   * Different from a local cache being ready, and the difference matters: only
+   * after this can a caller tell "this field is empty" from "this field is set and
+   * the value is still in flight". Writing a value that was already on its way is
+   * how one title became two. Deliberately never resolves while offline — a write
+   * that has to be correct can wait for the connection.
+   */
+  whenSynced(): Promise<void> {
+    return this.#synced;
   }
 
   destroy(): void {
@@ -167,6 +186,13 @@ export class NoteProvider {
         // Tagging the origin with `this` is what stops the echo: the update
         // handler above ignores anything this provider applied.
         Y.applyUpdate(this.#options.doc, body, this);
+        // The server answers every state vector with a diff, empty or not, so this
+        // fires once per connection — and only for a diff, because an update
+        // relayed from another client says nothing about the server's history.
+        if (kind === MSG_DIFF && this.#markSynced) {
+          this.#markSynced();
+          this.#markSynced = null;
+        }
         break;
     }
   }
