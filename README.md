@@ -63,56 +63,37 @@ cargo test --workspace
 pnpm -r check
 ```
 
-## 部署到 NAS
+## 部署到绿联 UGOS PRO
 
-NAS 上只需要 Docker。镜像会由 GitHub Actions 自动构建并发布，不需要在 NAS 上安装 Rust 或 Node.js。
+NoteDock 已经提供好 compose 文件，适合你的 x86 版 UGOS PRO。NAS 上只需要安装 Docker，不需要安装 Rust 或 Node.js。
 
-先下载项目：
+### 方法一：在 UGOS 界面部署
+
+1. 下载仓库里的 [`deploy/docker-compose.yml`](deploy/docker-compose.yml)。
+2. 在 UGOS 的 Docker / Compose 项目中新建项目，上传这个 compose 文件并启动。
+3. 第一次打开 Web 页面时，会出现“设置 NoteDock”页面。
+4. 在页面里设置访问密码，服务端会自动保存密码的安全哈希，以后直接登录即可。
+
+compose 已固定使用 `linux/amd64`，会自动拉取公开镜像 `ghcr.io/qwejun/notedock:latest`，不需要手动填写密码环境变量。
+
+### 方法二：SSH 到 NAS 部署
 
 ```bash
 git clone https://github.com/qwejun/notedock.git
 cd notedock
+docker compose -f deploy/docker-compose.yml pull
+docker compose -f deploy/docker-compose.yml up -d
 ```
 
-生成登录密码的哈希：
+然后打开 Web 页面，第一次使用时设置密码。
 
-```bash
-docker compose -f deploy/docker-compose.yml run --rm \
-  --entrypoint notedock-server notedock \
-  hash-password '换成你自己的密码'
-```
-
-在 `deploy/.env` 中写入生成的结果：
-
-```env
-NOTEDOCK_PASSWORD_HASH=这里填上面生成的整串内容
-```
-
-启动服务：
-
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml pull
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
-```
-
-默认端口是 `8080`，浏览器打开：
-
-```text
-http://你的IPv6域名:8080
-```
-
-也可以在 `deploy/.env` 里修改端口：
+默认端口是 `8080`，浏览器打开 `http://你的IPv6域名:8080`。需要换端口时，在 UGOS 的环境变量中添加：
 
 ```env
 NOTEDOCK_PORT=18080
 ```
 
-数据保存在 Docker volume `notedock-data` 中。升级时执行：
-
-```bash
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml pull
-docker compose --env-file deploy/.env -f deploy/docker-compose.yml up -d
-```
+数据保存在 Docker volume `notedock-data` 中。升级时再次执行 `pull` 和 `up -d` 即可。
 
 ## 自动构建 Docker
 

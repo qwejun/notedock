@@ -3,10 +3,8 @@
 # Only the application port is published: the database is a file inside the
 # container's volume and is never reachable from the network.
 #
-#   1. Generate a password hash (no plaintext password reaches the NAS):
-#        docker compose run --rm --entrypoint notedock-server notedock hash-password '你的密码'
-#   2. Put the result in .env as NOTEDOCK_PASSWORD_HASH=...
-#   3. docker compose up -d
+#   1. Start the container.
+#   2. Open the Web page and set the password on first launch.
 #
 # The first-stage deployment is plain HTTP by design. See the commented-out Caddy
 # service at the bottom for turning on TLS, which is the only change needed —
@@ -16,12 +14,11 @@ services:
   notedock:
     # Published by GitHub Actions; NAS deployments pull this image directly.
     image: ghcr.io/qwejun/notedock:latest
+    # UGOS PRO x86 uses the amd64 Docker platform.
+    platform: linux/amd64
+    container_name: notedock
     restart: unless-stopped
     environment:
-      # Required. Argon2 PHC string; the server refuses to start without it.
-      # Empty is allowed only so the one-shot hash-password command can run
-      # before .env exists; the server refuses to start without a real hash.
-      NOTEDOCK_PASSWORD_HASH: ${NOTEDOCK_PASSWORD_HASH:-}
       NOTEDOCK_SESSION_TTL_DAYS: ${NOTEDOCK_SESSION_TTL_DAYS:-30}
       # Same-origin in production: the server hands out the browser client
       # itself, so no cross-origin request ever happens.

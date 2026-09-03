@@ -21,7 +21,7 @@ use axum::{
     response::Response,
     Json,
 };
-use notedock_api::{LoginRequest, LoginResponse};
+use notedock_api::{AuthStatusResponse, LoginRequest, LoginResponse, SetupRequest};
 use sha2::{Digest, Sha256};
 use std::time::Duration;
 use uuid::Uuid;
@@ -70,39 +70,86 @@ pub fn token_hash(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
-pub async fn login(
-    State(state): State<AppState>,
-    Json(req): Json<LoginRequest>,
-) -> AppResult<Json<LoginResponse>> {
-    if !verify_password(&req.password, &state.config.password_hash) {
-        tokio::time::sleep(FAILED_LOGIN_DELAY).await;
-        return Err(AppError::Unauthorized);
+async fn stored_password_hash(state: &AppState) -> AppResult<Option<String>> {
+    if !state.config.password_hash.trim().is_empty() {
+        return Ok(Some(state.config.password_hash.clone()));
     }
 
+    sqlx::query_scalar("SELECT value FROM app_settings WHERE key = 'password_hash'")
+        .fetch_optional(&state.pool)
+        .await
+        .map_err(AppError::from)
+}
+
+async fn create_session(state: &AppState, label: Option<&str>) -> AppResult<LoginResponse> {
     let now = chrono::Utc::now();
     let expires_at = (now + chrono::Duration::days(state.config.session_ttl_days))
         .to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-
     let token = new_token();
 
-    // Successful login is a good moment to take out the trash.
     sqlx::query("DELETE FROM sessions WHERE expires_at <= ?1")
         .bind(now_rfc3339())
         .execute(&state.pool)
         .await?;
-
     sqlx::query(
         "INSERT INTO sessions (token_hash, label, created_at, expires_at) \
          VALUES (?1, ?2, ?3, ?4)",
     )
     .bind(token_hash(&token))
-    .bind(req.label.as_deref())
+    .bind(label)
     .bind(now_rfc3339())
     .bind(&expires_at)
     .execute(&state.pool)
     .await?;
 
-    Ok(Json(LoginResponse { token, expires_at }))
+    Ok(LoginResponse { token, expires_at })
+}
+
+pub async fn status(State(state): State<AppState>) -> AppResult<Json<AuthStatusResponse>> {
+    Ok(Json(AuthStatusResponse {
+        initialized: stored_password_hash(&state).await?.is_some(),
+    }))
+}
+
+pub async fn setup(
+    State(state): State<AppState>,
+    Json(req): Json<SetupRequest>,
+) -> AppResult<Json<LoginResponse>> {
+    if req.password.chars().count() < 8 {
+        return Err(AppError::BadRequest("密码至少需要 8 个字符".to_owned()));
+    }
+    if stored_password_hash(&state).await?.is_some() {
+        return Err(AppError::BadRequest("密码已经设置，请直接登录".to_owned()));
+    }
+
+    let hash = hash_password(&req.password).map_err(AppError::Internal)?;
+    let result = sqlx::query(
+        "INSERT INTO app_settings (key, value) VALUES ('password_hash', ?1) \
+         ON CONFLICT(key) DO NOTHING",
+    )
+    .bind(hash)
+    .execute(&state.pool)
+    .await?;
+    if result.rows_affected() == 0 {
+        return Err(AppError::BadRequest("密码已经设置，请直接登录".to_owned()));
+    }
+
+    Ok(Json(create_session(&state, req.label.as_deref()).await?))
+}
+
+pub async fn login(
+    State(state): State<AppState>,
+    Json(req): Json<LoginRequest>,
+) -> AppResult<Json<LoginResponse>> {
+    let Some(password_hash) = stored_password_hash(&state).await? else {
+        return Err(AppError::BadRequest("尚未设置密码，请先打开 Web 端完成初始化".to_owned()));
+    };
+    if !verify_password(&req.password, &password_hash) {
+        tokio::time::sleep(FAILED_LOGIN_DELAY).await;
+        return Err(AppError::Unauthorized);
+    }
+
+    Ok(Json(create_session(&state, req.label.as_deref()).await?))
 }
 
 /// Rejects anything without a live bearer token. Applied to the whole `/api/v1`

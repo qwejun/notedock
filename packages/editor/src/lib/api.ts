@@ -1,4 +1,5 @@
 import type {
+  AuthStatusResponse,
   ApiErrorBody,
   CreateNoteRequest,
   ErrorCode,
@@ -6,6 +7,7 @@ import type {
   NoteSummary,
   SyncResponse,
   TicketResponse,
+  SetupRequest,
 } from "../generated/api";
 
 /** A response the server rejected, carrying the structured body it sent. */
@@ -66,6 +68,16 @@ export class NoteDockClient {
       password,
       label: label ?? null,
     });
+    this.#token = res.token;
+    return res;
+  }
+
+  authStatus(): Promise<AuthStatusResponse> {
+    return this.#request<AuthStatusResponse>("GET", "/auth/status");
+  }
+
+  async setup(body: SetupRequest): Promise<LoginResponse> {
+    const res = await this.#request<LoginResponse>("POST", "/auth/setup", body);
     this.#token = res.token;
     return res;
   }

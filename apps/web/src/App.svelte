@@ -10,6 +10,7 @@
     type PaletteItem,
   } from "@notedock/editor";
   import Login from "./components/Login.svelte";
+  import Setup from "./components/Setup.svelte";
   import Sidebar from "./components/Sidebar.svelte";
   import { NotesStore } from "./lib/store.svelte";
 
@@ -28,10 +29,7 @@
   );
 
   onMount(() => {
-    if (store.authed) {
-      void store.refresh();
-      store.start();
-    }
+    void store.init();
     return () => store.stop();
   });
 
@@ -65,7 +63,11 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-{#if !store.authed}
+{#if !store.authReady}
+  <div class="loading">正在连接…</div>
+{:else if !store.initialized}
+  <Setup busy={store.busy} message={store.message} onSubmit={(pw) => void store.setup(pw)} />
+{:else if !store.authed}
   <Login busy={store.busy} message={store.message} onSubmit={(pw) => void store.login(pw)} />
 {:else}
   <div class="shell">
@@ -130,6 +132,14 @@
 {/if}
 
 <style>
+  .loading {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    color: var(--nd-fg-dim);
+    font-size: var(--nd-text-sm);
+  }
+
   .shell {
     display: flex;
     height: 100%;

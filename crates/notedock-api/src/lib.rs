@@ -106,6 +106,20 @@ pub struct LoginResponse {
     pub expires_at: Timestamp,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "api.ts")]
+pub struct AuthStatusResponse {
+    pub initialized: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
+#[ts(export, export_to = "api.ts")]
+pub struct SetupRequest {
+    pub password: String,
+    #[serde(default)]
+    pub label: Option<String>,
+}
+
 /// Short-lived credential for opening the note WebSocket.
 ///
 /// The browser's `WebSocket` constructor cannot set an `Authorization` header, so

@@ -26,6 +26,8 @@ export class NotesStore {
   #cursor = 0;
 
   authed = $state(Boolean(localStorage.getItem(TOKEN_KEY)));
+  initialized = $state(false);
+  authReady = $state(false);
   notes = $state<NoteSummary[]>([]);
   selectedId = $state<string | null>(null);
 
@@ -39,6 +41,21 @@ export class NotesStore {
   status = $state<SyncStatus>("synced");
   message = $state<string | null>(null);
   busy = $state(false);
+
+  async init(): Promise<void> {
+    try {
+      const status = await this.#client.authStatus();
+      this.initialized = status.initialized;
+      if (this.authed) {
+        await this.refresh();
+        this.start();
+      }
+    } catch (error) {
+      this.message = describe(error, "无法连接到服务器");
+    } finally {
+      this.authReady = true;
+    }
+  }
 
   get hasSelection(): boolean {
     return this.session !== null;
@@ -154,6 +171,24 @@ export class NotesStore {
     this.selectedId = id;
     this.session = session;
     this.title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
+  }
+
+  async setup(password: string): Promise<void> {
+    this.busy = true;
+    this.message = null;
+    try {
+      const { token } = await this.#client.setup({ password, label: "browser" });
+      localStorage.setItem(TOKEN_KEY, token);
+      this.initialized = true;
+      this.authed = true;
+      await this.refresh();
+      this.start();
+    } catch (error) {
+      this.message = describe(error, "初始化失败");
+      throw error;
+    } finally {
+      this.busy = false;
+    }
   }
 
   renameTitle(title: string): void {

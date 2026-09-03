@@ -5,6 +5,8 @@
  */
 export type ApiErrorBody = { code: ErrorCode, message: string, };
 
+export type AuthStatusResponse = { initialized: boolean, };
+
 export type CreateNoteRequest = { 
 /**
  * Client-chosen UUID. Set by the desktop app so a note written while
@@ -51,6 +53,8 @@ preview: string, rev: number, updated_at: string,
  * drop their local copies; the list endpoint omits them.
  */
 deleted: boolean, };
+
+export type SetupRequest = { password: string, label: string | null, };
 
 export type SyncResponse = { 
 /**

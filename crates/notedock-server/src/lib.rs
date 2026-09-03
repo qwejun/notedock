@@ -51,6 +51,8 @@ pub fn router(state: AppState) -> Router {
         ));
 
     let api = Router::new()
+        .route("/auth/status", get(auth::status))
+        .route("/auth/setup", post(auth::setup))
         .route("/auth/login", post(auth::login))
         // Outside the bearer middleware on purpose: a browser cannot set headers
         // on a WebSocket handshake, so this route authenticates with the
