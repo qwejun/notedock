@@ -1,0 +1,23 @@
+{
+  "name": "@notedock/web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "dependencies": {
+    "@notedock/editor": "workspace:*"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "7.3.0",
+    "@types/node": "24.10.1",
+    "svelte": "5.57.0",
+    "svelte-check": "4.7.6",
+    "typescript": "5.9.3",
+    "vite": "8.2.2"
+  }
+}

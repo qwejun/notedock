@@ -1,0 +1,40 @@
+[package]
+name = "notedock-server"
+description = "NoteDock NAS server: notes, sync and auth over HTTP"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+notedock-api = { workspace = true }
+
+axum = { workspace = true, features = ["ws"] }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+sqlx = { workspace = true, features = ["macros"] }
+yrs = { workspace = true }
+futures-util = "0.3"
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+argon2 = { workspace = true }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+tempfile = "3"
+# A real WebSocket client: the upgrade needs an actual TCP connection, so the
+# collaboration tests cannot go through `oneshot`.
+tokio-tungstenite = "0.30"
+reqwest = { workspace = true }

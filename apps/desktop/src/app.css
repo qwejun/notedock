@@ -1,0 +1,63 @@
+/*
+ * The window is `transparent: true` and undecorated, so the page itself has to
+ * draw the app: a rounded frosted panel with nothing behind it. `body` must stay
+ * fully transparent or the transparency is wasted.
+ */
+
+html,
+body {
+  background: transparent;
+  overflow: hidden;
+  /* Undecorated windows have no chrome to select, and a drag that selects text
+   * instead of moving the window feels broken. */
+  user-select: none;
+}
+
+/* Keep the floating client in a deliberate graphite palette even when Windows
+ * is using light mode. It stays readable over wallpapers and gives the
+ * frameless window a real desktop-tool identity. */
+:root {
+  color-scheme: dark;
+  --nd-bg: rgb(17 20 27 / 94%);
+  --nd-bg-solid: #11141b;
+  --nd-bg-elev: #1b202a;
+  --nd-bg-hover: rgb(255 255 255 / 7%);
+  --nd-bg-active: rgb(255 255 255 / 11%);
+  --nd-border: rgb(255 255 255 / 10%);
+  --nd-border-strong: rgb(255 255 255 / 17%);
+  --nd-fg: #f1f4f9;
+  --nd-fg-dim: #a7afbd;
+  --nd-fg-faint: #707987;
+  --nd-accent: #75a7ff;
+  --nd-accent-soft: rgb(117 167 255 / 17%);
+  --nd-radius-md: 14px;
+  --nd-radius-sm: 8px;
+  --nd-shadow-lg: 0 20px 60px -12px rgb(0 0 0 / 72%);
+}
+
+#app {
+  height: 100vh;
+  /* Set from the opacity slider; applied here so the frosted panel and the text
+   * fade together. */
+  opacity: var(--nd-window-opacity, 1);
+}
+
+/* Text inside the editor is of course selectable. */
+.nd-prose {
+  user-select: text;
+}
+
+input {
+  user-select: text;
+}
+
+/*
+ * Full-viewport overlays — the settings sheet and the command palette — are
+ * `position: fixed`, so they would paint square corners over the window's
+ * rounded ones and spill onto the transparent pixels outside it. The web client
+ * needs no such rule: there, the viewport really is rectangular.
+ */
+.backdrop {
+  border-radius: var(--nd-radius-md);
+  overflow: hidden;
+}

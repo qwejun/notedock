@@ -1,0 +1,5 @@
+# Makes `cargo test -p notedock-api` drop the generated TypeScript next to the
+# code that consumes it, instead of into crates/notedock-api/bindings/.
+# `relative = true` resolves against the directory holding this config file.
+[env]
+TS_RS_EXPORT_DIR = { value = "packages/editor/src/generated", relative = true }

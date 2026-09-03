@@ -1,0 +1,9 @@
+/* Browser-client shell. Layout only; every colour comes from the shared tokens. */
+
+body {
+  background: var(--nd-bg-solid);
+}
+
+#app {
+  height: 100dvh;
+}

@@ -1,0 +1,130 @@
+/*
+ * How note content renders. Applied to the ProseMirror surface in both clients,
+ * so a note looks identical in the floating window and the browser.
+ */
+
+.nd-prose {
+  outline: none;
+  color: var(--nd-fg);
+  font-size: var(--nd-text-md);
+  line-height: var(--nd-leading);
+  overflow-wrap: break-word;
+  /* Nothing may force the surface wider than its container: the desktop window
+   * can be dragged down to 250px and must never scroll sideways. */
+  word-break: break-word;
+}
+
+.nd-prose > * + * {
+  margin-top: calc(var(--nd-space) * 2);
+}
+
+.nd-prose p {
+  margin: 0;
+}
+
+.nd-prose h1,
+.nd-prose h2,
+.nd-prose h3 {
+  margin: calc(var(--nd-space) * 4) 0 calc(var(--nd-space) * 1.5);
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.nd-prose h1 {
+  font-size: 1.5em;
+}
+.nd-prose h2 {
+  font-size: 1.25em;
+}
+.nd-prose h3 {
+  font-size: 1.1em;
+}
+
+.nd-prose > :first-child {
+  margin-top: 0;
+}
+
+.nd-prose ul,
+.nd-prose ol {
+  margin: 0;
+  padding-left: calc(var(--nd-space) * 5);
+}
+
+.nd-prose li > p {
+  margin: 0;
+}
+
+.nd-prose blockquote {
+  margin: 0;
+  padding-left: calc(var(--nd-space) * 3);
+  border-left: 2px solid var(--nd-accent);
+  color: var(--nd-fg-dim);
+}
+
+.nd-prose code {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--nd-bg-hover);
+  font-family: var(--nd-font-mono);
+  font-size: 0.9em;
+}
+
+.nd-prose pre {
+  margin: 0;
+  padding: calc(var(--nd-space) * 2.5);
+  border-radius: var(--nd-radius-sm);
+  background: var(--nd-bg-hover);
+  overflow-x: auto;
+}
+
+.nd-prose pre code {
+  padding: 0;
+  background: none;
+}
+
+.nd-prose hr {
+  height: 1px;
+  margin: calc(var(--nd-space) * 4) 0;
+  border: none;
+  background: var(--nd-border-strong);
+}
+
+.nd-prose a {
+  color: var(--nd-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.nd-prose mark {
+  padding: 0 2px;
+  border-radius: 3px;
+  /* TipTap's Highlight extension writes the colour inline; this is the
+   * unstyled fallback. Text colour is left alone so highlights stay legible in
+   * both themes. */
+  background: var(--nd-warn);
+  color: #1a1b1f;
+}
+
+.nd-prose img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--nd-radius-sm);
+}
+
+/* Placeholder for an empty document, from @tiptap/extension-placeholder. */
+.nd-prose p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  color: var(--nd-fg-faint);
+  pointer-events: none;
+}
+
+/* ProseMirror's own gap/drop cursors, themed. */
+.nd-prose .ProseMirror-gapcursor::after {
+  border-top-color: var(--nd-fg);
+}
+
+.nd-prose img.ProseMirror-selectednode {
+  outline: 2px solid var(--nd-accent);
+}

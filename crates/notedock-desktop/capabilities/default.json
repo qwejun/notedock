@@ -1,0 +1,21 @@
+{
+  "identifier": "default",
+  "description": "Minimum capabilities NoteDock's floating window needs. Ported from V1, minus the fs and dialog plugins: all note storage and every HTTP request now happen in Rust, so the webview needs no filesystem or network reach of its own.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:window:allow-close",
+    "core:window:allow-minimize",
+    "core:window:allow-hide",
+    "core:window:allow-show",
+    "core:window:allow-set-focus",
+    "core:window:allow-start-dragging",
+    "core:window:allow-set-always-on-top",
+    "core:window:allow-set-skip-taskbar",
+    "core:window:allow-set-ignore-cursor-events",
+    "core:window:allow-is-visible",
+    "core:event:default",
+    "core:tray:default"
+  ]
+}

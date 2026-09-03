@@ -1,0 +1,10 @@
+# nodeLinker: hoisted is required on this machine — the default junction linker
+# produces empty package directories under Windows here.
+nodeLinker: hoisted
+
+allowBuilds:
+  esbuild: true
+
+packages:
+  - packages/*
+  - apps/*

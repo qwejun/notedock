@@ -1,0 +1,14 @@
+.git
+.github
+.claude
+.codex
+.agents
+node_modules
+target
+data
+*.db
+*.db-shm
+*.db-wal
+deploy/.env
+desktop-check.png
+*.exe

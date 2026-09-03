@@ -1,0 +1,274 @@
+import { NoteSession, type ConnectionState, type NoteSummary } from "@notedock/editor";
+import type { SyncState } from "@notedock/editor/generated/desktop";
+import { bridge, reason } from "./bridge";
+
+const OFFLINE: SyncState = {
+  status: "offline",
+  message: null,
+  pending: 0,
+  logged_in: false,
+  server_url: "",
+};
+
+/**
+ * All window state.
+ *
+ * There is no autosave and no document JSON here. The open note is a
+ * {@link NoteSession} whose Y.Doc converges over its own WebSocket, so every
+ * keystroke is already on its way out — "saving" is not an operation this app
+ * performs. What Rust still owns is the note *list*, which is what makes the
+ * window usable with no network.
+ */
+export class DesktopStore {
+  notes = $state<NoteSummary[]>([]);
+  selectedId = $state<string | null>(null);
+  spotlightId = $state<string | null>(null);
+
+  /** The open note's document. Replacing it is what makes the editor rebind. */
+  session = $state<NoteSession | null>(null);
+  title = $state("");
+
+  /** Metadata sync, reported by Rust. */
+  sync = $state<SyncState>(OFFLINE);
+  /** The document socket, which is what the sync dot actually reflects. */
+  connection = $state<ConnectionState>("offline");
+  error = $state<string | null>(null);
+
+  opacity = $state(1);
+  alwaysOnTop = $state(true);
+  /** Not persisted on purpose: a window that starts click-through is a trap. */
+  clickThrough = $state(false);
+  info = $state<Awaited<ReturnType<typeof bridge.appInfo>> | null>(null);
+
+  get hasSelection(): boolean {
+    return this.session !== null;
+  }
+
+  /**
+   * What the dot shows.
+   *
+   * With a note open this follows the document socket — that is the connection the
+   * user's keystrokes travel over. With no note open there is no socket, so it
+   * falls back to the metadata loop's own state.
+   */
+  get status(): SyncState["status"] {
+    if (!this.session) return this.sync.status;
+    return this.connection === "live"
+      ? "synced"
+      : this.connection === "connecting"
+        ? "syncing"
+        : "offline";
+  }
+
+  async init(): Promise<() => void> {
+    const unlisten = await bridge.onSync((state) => {
+      this.sync = state;
+      void this.#reconcile();
+    });
+
+    try {
+      this.sync = await bridge.syncState();
+      this.spotlightId = await bridge.getSpotlight();
+      const prefs = await bridge.windowPrefs();
+      this.opacity = prefs.opacity;
+      this.alwaysOnTop = prefs.always_on_top;
+      await this.refresh();
+    } catch (error) {
+      this.error = reason(error);
+    }
+
+    return unlisten;
+  }
+
+  async refresh(): Promise<void> {
+    try {
+      this.notes = await bridge.listNotes();
+      if (!this.selectedId) {
+        // Prefer the note pinned in settings; otherwise the most recent one. A
+        // floating notepad that opens to nothing has wasted the summon.
+        const preferred =
+          this.spotlightId && this.notes.some((note) => note.id === this.spotlightId)
+            ? this.spotlightId
+            : this.notes[0]?.id;
+        if (preferred) this.open(preferred);
+      }
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  /**
+   * Reacts to a completed metadata sync: pick up new notes, and drop the open one
+   * if it was deleted elsewhere.
+   *
+   * Note that the *body* needs nothing here — it arrives over the document socket
+   * as it is typed, which is why there is no longer any "reload the editor"
+   * branch to get wrong.
+   */
+  async #reconcile(): Promise<void> {
+    await this.refresh();
+    const id = this.selectedId;
+    if (!id) return;
+
+    const summary = this.notes.find((note) => note.id === id);
+    if (!summary) {
+      this.#close();
+      const next = this.notes[0];
+      if (next) this.open(next.id);
+      return;
+    }
+    // The title is derived server-side from the document, so it arrives here.
+    this.title = summary.title;
+  }
+
+  open(id: string, seedTitle = ""): void {
+    if (id === this.selectedId) return;
+    this.#close();
+
+    const session = new NoteSession({
+      noteId: id,
+      // The webview caches the document so a note opens instantly and stays
+      // editable with the network down.
+      cacheKey: `notedock:${id}`,
+      ticket: () => bridge.wsUrl(),
+      onState: (state) => (this.connection = state),
+      initialTitle: this.notes.find((note) => note.id === id)?.title ?? seedTitle,
+      onTitle: (title) => (this.title = title),
+    });
+
+    // A note named from the palette starts with that name as its first line,
+    // which is also what the server derives the title from.
+    if (seedTitle) {
+      void session.whenReady().then(() => session.seedTitle(seedTitle));
+    }
+
+    this.selectedId = id;
+    this.session = session;
+    this.title = this.notes.find((note) => note.id === id)?.title ?? seedTitle;
+  }
+
+  renameTitle(title: string): void {
+    this.title = title;
+    this.session?.setTitle(title);
+  }
+
+  async openWeb(): Promise<void> {
+    try {
+      await bridge.openWeb();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async create(title = ""): Promise<void> {
+    try {
+      const note = await bridge.createNote(title);
+      await this.refresh();
+      this.open(note.id, title);
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async remove(id: string): Promise<void> {
+    try {
+      await bridge.deleteNote(id);
+      if (id === this.selectedId) this.#close();
+      await this.refresh();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async toggleSpotlight(): Promise<void> {
+    if (!this.selectedId) return;
+    const next = this.spotlightId === this.selectedId ? null : this.selectedId;
+    try {
+      await bridge.setSpotlight(next);
+      this.spotlightId = next;
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  /** Live preview while the slider moves; nothing is written to disk yet. */
+  previewOpacity(value: number): void {
+    this.opacity = value;
+  }
+
+  /** Called when the slider is released. */
+  async commitOpacity(value: number): Promise<void> {
+    this.opacity = value;
+    try {
+      await bridge.setOpacity(value);
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async toggleAlwaysOnTop(): Promise<void> {
+    const next = !this.alwaysOnTop;
+    try {
+      await bridge.setAlwaysOnTop(next);
+      this.alwaysOnTop = next;
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async toggleClickThrough(): Promise<void> {
+    const next = !this.clickThrough;
+    try {
+      await bridge.setClickThrough(next);
+      this.clickThrough = next;
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async syncNow(): Promise<void> {
+    try {
+      this.sync = await bridge.syncNow();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async login(serverUrl: string, password: string): Promise<void> {
+    this.error = null;
+    try {
+      this.sync = await bridge.login(serverUrl, password);
+      await this.refresh();
+    } catch (error) {
+      this.error = reason(error);
+      throw error;
+    }
+  }
+
+  async logout(): Promise<void> {
+    try {
+      this.#close();
+      this.sync = await bridge.logout();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  /** Version and paths for the settings panel. Fetched once. */
+  async loadInfo(): Promise<void> {
+    if (this.info) return;
+    try {
+      this.info = await bridge.appInfo();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  #close(): void {
+    this.session?.destroy();
+    this.session = null;
+    this.selectedId = null;
+    this.title = "";
+    this.connection = "offline";
+  }
+}

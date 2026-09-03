@@ -1,0 +1,52 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["qwejun"]
+repository = "https://github.com/qwejun/notedock"
+
+[workspace.dependencies]
+notedock-api = { path = "crates/notedock-api" }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ts-rs = "12"
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "signal"] }
+axum = "0.8"
+# Yjs, Rust side. The server materializes each note's document so titles,
+# previews and future full-text search stay derived in exactly one place.
+yrs = "0.27"
+tower-http = { version = "0.7", features = ["cors", "trace", "fs"] }
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio",
+  "sqlite",
+  "migrate",
+] }
+
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+uuid = { version = "1", features = ["v4", "v7", "serde"] }
+chrono = { version = "0.4", default-features = false, features = ["std", "clock", "serde"] }
+sha2 = "0.10"
+hex = "0.4"
+argon2 = "0.5"
+
+# Desktop only. rustls rather than the platform TLS stack so the same binary
+# behaves identically once the deployment moves from HTTP to HTTPS.
+reqwest = { version = "0.12", default-features = false, features = [
+  "json",
+  "rustls-tls",
+] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

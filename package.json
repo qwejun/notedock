@@ -1,0 +1,13 @@
+{
+  "name": "notedock",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@11.1.1",
+  "scripts": {
+    "build": "pnpm -r build",
+    "check": "pnpm -r check",
+    "dev:web": "pnpm --filter @notedock/web dev",
+    "dev:desktop": "pnpm --filter @notedock/desktop dev"
+  }
+}

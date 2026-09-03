@@ -1,0 +1,45 @@
+[package]
+name = "notedock-desktop"
+description = "NoteDock floating desktop notepad"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[lib]
+name = "notedock_desktop_lib"
+crate-type = ["lib", "cdylib", "staticlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+notedock-api = { workspace = true }
+
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
+reqwest = { workspace = true }
+sqlx = { workspace = true, features = ["macros"] }
+
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+# Same contract-generation story as notedock-api: the few desktop-only types the
+# webview sees are exported to TypeScript by `cargo test -p notedock-desktop`.
+ts-rs = { workspace = true, features = ["serde-json-impl"] }
+
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+uuid = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+# The sync tests run against a real server rather than a mock: the parts most
+# likely to be wrong are the HTTP status codes and the revision arithmetic, and a
+# mock would encode the same assumptions it is meant to check.
+notedock-server = { path = "../notedock-server" }
+axum = { workspace = true }
+tempfile = "3"
