@@ -117,6 +117,16 @@ export class NoteSession {
     return this.#ready;
   }
 
+  /**
+   * Awaits the *server*, not the cache: resolves once this document holds
+   * everything the server had. Deliberately never resolves while offline, so a
+   * caller that must not act on a half-known document can simply wait — see
+   * {@link NoteProvider.whenSynced}.
+   */
+  whenSynced(): Promise<void> {
+    return this.#provider.whenSynced();
+  }
+
   get state(): ConnectionState {
     return this.#provider.state;
   }

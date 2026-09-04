@@ -21,6 +21,17 @@ export const ICON_PATHS = {
   check: "M4 12l5 5L20 6",
   close: "M6 6l12 12M18 6L6 18",
   minimize: "M5 12h14",
+  /** A plain square, the way every Windows caption bar draws "maximize". */
+  maximize: "M5 5h14v14H5z",
+  /** Two overlapping squares: the front one is where the window will land, the
+   * one behind it is the screen it is giving back. */
+  restore: "M4 10h10v10H4zM10 10V4h10v10h-6",
+  /**
+   * The universal power symbol: a ring broken at the top with the stroke rising
+   * through the gap. Used for 退出 — the one window action that is not reversible,
+   * so it deliberately does not reuse the × glyph that now only hides.
+   */
+  power: "M18.36 6.64a9 9 0 1 1-12.73 0M12 2v10",
   plus: "M12 5v14M5 12h14",
   trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13",
   pin: "M8 4h8l1 6 3 3v2h-7v5l-1 1-1-1v-5H4v-2l3-3z",

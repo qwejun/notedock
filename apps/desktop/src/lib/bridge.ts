@@ -1,10 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import type { NoteSummary } from "@notedock/editor";
+import type { ExportedNote, NoteSummary } from "@notedock/editor";
 import type { AppInfo, LocalNote, SyncState, WindowPrefs } from "@notedock/editor/generated/desktop";
 
 /** Must match `notedock_desktop_lib::sync::SYNC_EVENT`. */
 const SYNC_EVENT = "notedock:sync";
+
+/** Must match `notedock_desktop_lib::commands::MAXIMIZED_EVENT`. */
+const MAXIMIZED_EVENT = "notedock:maximized";
 
 /**
  * Every call the window can make into Rust.
@@ -33,6 +36,11 @@ export const bridge = {
     invoke<SyncState>("login", { serverUrl, password }),
   logout: () => invoke<SyncState>("logout"),
   openWeb: () => invoke<void>("open_web"),
+  /**
+   * Writes every note into a timestamped folder under Documents\NoteDock and
+   * resolves to that folder.
+   */
+  exportNotes: (notes: ExportedNote[]) => invoke<string>("export_notes", { notes }),
 
   setClickThrough: (active: boolean) => invoke<void>("set_click_through", { active }),
   setAlwaysOnTop: (onTop: boolean) => invoke<void>("set_always_on_top", { onTop }),
@@ -40,12 +48,26 @@ export const bridge = {
   /** Persists the opacity. Call on slider release, not on every tick. */
   setOpacity: (value: number) => invoke<void>("set_opacity", { value }),
   appInfo: () => invoke<AppInfo>("app_info"),
+  /** Whether Windows launches the app at sign-in. Read from the registry, live. */
+  autostart: () => invoke<boolean>("autostart"),
+  setAutostart: (enabled: boolean) => invoke<void>("set_autostart", { enabled }),
   quit: () => invoke<void>("quit"),
   minimizeWindow: () => invoke<void>("minimize_window"),
-  closeWindow: () => invoke<void>("close_window"),
+  /** Hides to the tray. Not a quit — `quit` is the one that ends the process. */
+  hideWindow: () => invoke<void>("hide_window"),
+  /** Fills the screen or restores the floating size; resolves to the new state. */
+  toggleMaximize: () => invoke<boolean>("toggle_maximize"),
+  isMaximized: () => invoke<boolean>("is_maximized"),
 
   onSync: (handler: (state: SyncState) => void): Promise<UnlistenFn> =>
     listen<SyncState>(SYNC_EVENT, (event) => handler(event.payload)),
+
+  /**
+   * Fires on every resize, including the ones no command asked for — `Win`+`↑`,
+   * a drag to the top of the screen, a double-click on the title bar.
+   */
+  onMaximized: (handler: (maximized: boolean) => void): Promise<UnlistenFn> =>
+    listen<boolean>(MAXIMIZED_EVENT, (event) => handler(event.payload)),
 };
 
 /** Tauri command errors arrive as plain strings. */

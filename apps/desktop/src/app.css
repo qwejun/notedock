@@ -33,6 +33,12 @@ body {
   --nd-radius-md: 14px;
   --nd-radius-sm: 8px;
   --nd-shadow-lg: 0 20px 60px -12px rgb(0 0 0 / 72%);
+
+  /* The reading column. Maximized the window is 1920px wide, which puts about 128
+   * CJK characters on a line — the eye loses the row it was on somewhere in the
+   * middle. 720px is roughly 45 characters, and the cap only ever engages when the
+   * window is wider than that, so the 400px floating size is untouched. */
+  --nd-measure: 720px;
 }
 
 #app {
@@ -60,4 +66,10 @@ input {
 .backdrop {
   border-radius: var(--nd-radius-md);
   overflow: hidden;
+}
+
+/* Full screen there are no transparent pixels to spill onto, and a rounded clip
+ * would instead cut four holes in the sheet. */
+:root[data-nd-max="true"] .backdrop {
+  border-radius: 0;
 }

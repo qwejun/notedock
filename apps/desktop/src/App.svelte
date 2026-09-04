@@ -42,6 +42,12 @@
     document.documentElement.dataset.ndOpaque = store.opacity >= 0.999 ? "true" : "false";
   });
 
+  /* Read by the `.backdrop` rule in app.css, which rounds the full-viewport
+     overlays to match the window and must stop doing so when it is square. */
+  $effect(() => {
+    document.documentElement.dataset.ndMax = store.maximized ? "true" : "false";
+  });
+
   /*
    * Opening or creating a note puts the caret in it. This is a notepad you summon
    * to write in — arriving at a note you then have to click is a wasted step.
@@ -67,6 +73,13 @@
   }
 
   function onKeydown(event: KeyboardEvent): void {
+    // F11 before the modifier check: it is the one window shortcut every other
+    // Windows app answers to, and it carries no modifier.
+    if (event.key === "F11") {
+      event.preventDefault();
+      void store.toggleMaximize();
+      return;
+    }
     if (!(event.ctrlKey || event.metaKey)) return;
     const key = event.key.toLowerCase();
 
@@ -103,18 +116,21 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="window nd-glass">
+<div class="window nd-glass" class:full={store.maximized}>
   <TitleBar
     status={store.sync.logged_in ? store.status : "offline"}
     pending={store.sync.logged_in ? store.sync.pending : 0}
     loggedIn={store.sync.logged_in}
+    maximized={store.maximized}
     onCreate={() => void store.create()}
     onSwitch={() => (paletteOpen = true)}
     canOpenWeb={store.sync.logged_in && Boolean(store.sync.server_url)}
     onOpenWeb={() => void store.openWeb()}
     onOpenSettings={() => (settingsOpen = true)}
+    onToggleMaximize={() => void store.toggleMaximize()}
     onMinimize={() => void bridge.minimizeWindow()}
-    onClose={() => void bridge.closeWindow()}
+    onHide={() => void bridge.hideWindow()}
+    onQuit={() => void bridge.quit()}
   />
 
   {#if store.clickThrough}
@@ -125,6 +141,10 @@
 
   {#if store.sync.message}
     <p class="banner" role="status">{store.sync.message}</p>
+  {/if}
+
+  {#if store.notice}
+    <p class="banner" role="status">{store.notice}</p>
   {/if}
 
   {#if store.error}
@@ -165,7 +185,6 @@
 <SettingsPanel
   open={settingsOpen}
   {store}
-  onSearch={() => (paletteOpen = true)}
   onClose={() => (settingsOpen = false)}
 />
 
@@ -185,6 +204,17 @@
     overflow: hidden;
   }
 
+  /*
+   * Full screen, the window is flush with the work area, so the rounded corners
+   * would show the desktop through them and the border would draw a hairline
+   * along the screen edge.
+   */
+  .window.full {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   /* The editor takes everything the header and banners leave. */
   .window :global(.frame) {
     flex: 1;
@@ -200,6 +230,38 @@
     font-size: 21px;
     font-weight: 700;
     letter-spacing: 0;
+  }
+
+  /*
+   * The reading column, wide windows only. Padding rather than `max-width`, so the
+   * title's rule and the editor's background still run the full width of the window
+   * and only the text is capped — a centred 720px card floating on a 1920px screen
+   * would read as a dialog, not as the note.
+   *
+   * `both-edges` is what keeps the two aligned: the scroller then reserves its 8px
+   * gutter on each side whether or not the note is long enough to scroll, so
+   * `.host`'s box stays centred in the window and its own centred column lands on
+   * the same axis as the title's. Without it the body would shift left by 4px the
+   * moment a scrollbar appeared.
+   */
+  .window :global(.scroller) {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .window :global(.nd-note-title),
+  .window :global(.scroller > .host) {
+    padding-inline: max(
+      var(--nd-gutter),
+      calc((100% - var(--nd-measure)) / 2)
+    );
+  }
+
+  .window :global(.nd-note-title) {
+    --nd-gutter: calc(var(--nd-space) * 5);
+  }
+
+  .window :global(.scroller > .host) {
+    --nd-gutter: calc(var(--nd-space) * 4);
   }
 
   .hint,

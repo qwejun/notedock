@@ -10,15 +10,24 @@ use std::sync::Arc;
 use tauri::{
     image::Image,
     menu::{Menu, MenuItem},
-    tray::{TrayIconBuilder, TrayIconEvent},
-    Manager,
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    Emitter, Manager,
 };
 use tracing_subscriber::EnvFilter;
 
+/// What a tray click and the 显示 / 隐藏 item both do.
 fn toggle_window(app: &tauri::AppHandle) {
     let Some(window) = app.get_webview_window("main") else {
         return;
     };
+    // Minimized counts as away rather than as shown: `−` leaves the window visible as
+    // far as Windows is concerned, so without this branch the first tray click would
+    // hide an already-invisible window and it would take two to get the note back.
+    if window.is_minimized().unwrap_or(false) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+        return;
+    }
     // `unwrap_or(true)` errs towards hiding: if the state cannot be read, the
     // click should still do something rather than nothing.
     if window.is_visible().unwrap_or(true) {
@@ -39,6 +48,13 @@ pub fn run() {
         .init();
 
     tauri::Builder::default()
+        // No launch arguments: the window is meant to be on screen after a sign-in,
+        // which is the whole point of a notepad that floats. `MacosLauncher` is
+        // ignored on Windows and is only here because the signature wants it.
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .setup(|app| {
             let handle = app.handle().clone();
             let app_data = handle
@@ -83,6 +99,11 @@ pub fn run() {
                 TrayIconBuilder::new()
                     .icon(icon)
                     .menu(&menu)
+                    // Left click is the toggle; the menu is right click's, as it is for
+                    // every other tray-resident program on Windows. Left-click-opens-menu
+                    // is Tauri's default and it fights this window: the menu would appear
+                    // over the note the same click just summoned.
+                    .show_menu_on_left_click(false)
                     .tooltip("NoteDock")
                     .on_menu_event(|app, event| match event.id.as_ref() {
                         "toggle" => toggle_window(app),
@@ -90,7 +111,17 @@ pub fn run() {
                         _ => {}
                     })
                     .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click { .. } = event {
+                        // The release of the left button, specifically. `Click` fires twice
+                        // for one physical click — once pressed, once released — so
+                        // matching the variant alone toggled the window and toggled it
+                        // back: it flashed and was gone before the finger came off the
+                        // mouse. Right click is left to the menu.
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
                             toggle_window(tray.app_handle());
                         }
                     })
@@ -99,6 +130,16 @@ pub fn run() {
             }
 
             Ok(())
+        })
+        // Reported from here rather than from the command, because maximizing does
+        // not always go through one: `Win`+`↑`, a drag to the top of the screen and
+        // a double-click on the title bar all arrive as a plain resize.
+        .on_window_event(|window, event| {
+            if matches!(event, tauri::WindowEvent::Resized(_)) {
+                if let Ok(maximized) = window.is_maximized() {
+                    let _ = window.emit(commands::MAXIMIZED_EVENT, maximized);
+                }
+            }
         })
         .invoke_handler(tauri::generate_handler![
             commands::list_notes,
@@ -113,14 +154,19 @@ pub fn run() {
             commands::login,
             commands::logout,
             commands::open_web,
+            commands::export_notes,
             commands::set_click_through,
             commands::set_always_on_top,
             commands::window_prefs,
             commands::set_opacity,
             commands::app_info,
+            commands::autostart,
+            commands::set_autostart,
             commands::quit,
             commands::minimize_window,
-            commands::close_window,
+            commands::hide_window,
+            commands::toggle_maximize,
+            commands::is_maximized,
         ])
         .run(tauri::generate_context!())
         .expect("error while running NoteDock");

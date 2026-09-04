@@ -18,6 +18,10 @@ tauri-build = { version = "2", features = [] }
 notedock-api = { workspace = true }
 
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# Autostart is one registry value under HKCU\…\Run, but the parts worth not
+# hand-rolling are quoting an exe path that contains spaces and answering "is that
+# entry still pointing at *this* copy" — both of which fail silently when wrong.
+tauri-plugin-autostart = "2"
 reqwest = { workspace = true }
 sqlx = { workspace = true, features = ["macros"] }
 

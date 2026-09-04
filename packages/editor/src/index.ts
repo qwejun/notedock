@@ -24,10 +24,19 @@ export {
   emptyDoc,
   HEADING_LEVELS,
   HIGHLIGHT_COLORS,
+  noteExtensions,
+  noteSchema,
   TEXT_COLORS,
   type JSONContent,
   type NoteEditorOptions,
 } from "./lib/tiptap";
 export { ICON_CIRCLES, ICON_PATHS, type IconCircle, type IconName } from "./lib/icons";
+export { toMarkdown } from "./lib/markdown";
+export {
+  exportAll,
+  fragmentToJSON,
+  type ExportAllOptions,
+  type ExportedNote,
+} from "./lib/export";
 
 export type * from "./generated/api";

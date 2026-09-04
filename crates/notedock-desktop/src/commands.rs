@@ -15,9 +15,11 @@ use crate::{
     sync::{Engine, SyncState},
 };
 use notedock_api::NoteSummary;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use tauri::{AppHandle, State, WebviewWindow};
+use tauri::{AppHandle, Manager, State, WebviewWindow};
+use tauri_plugin_autostart::ManagerExt;
 use ts_rs::TS;
 
 /// Commands report failures as plain strings: the webview only displays them,
@@ -179,6 +181,103 @@ pub async fn open_web(engine: State<'_, Arc<Engine>>) -> CmdResult<()> {
     Ok(())
 }
 
+/// One note on its way to disk. The webview does the Markdown conversion because
+/// only it knows what the schema means; this side only decides where files go.
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExportNote {
+    pub title: String,
+    pub markdown: String,
+}
+
+/// Writes every note into `Documents\NoteDock\<timestamp>\` and opens the folder.
+///
+/// A folder per run rather than files dumped in one directory: exporting twice
+/// otherwise leaves two interleaved generations behind, and there would be no way
+/// to tell which `笔记 (2).md` belonged to which export. The webview never learns
+/// a path, which is why the capability set still needs no filesystem plugin.
+#[tauri::command]
+pub fn export_notes(notes: Vec<ExportNote>, app: AppHandle) -> CmdResult<String> {
+    if notes.is_empty() {
+        return Err("没有可导出的笔记".to_owned());
+    }
+
+    let dir = app
+        .path()
+        .document_dir()
+        .map_err(|err| fail("找不到文档目录", err))?
+        .join("NoteDock")
+        .join(chrono::Local::now().format("%Y-%m-%d %H%M%S").to_string());
+    std::fs::create_dir_all(&dir).map_err(|err| fail("无法创建导出目录", err))?;
+
+    for note in &notes {
+        let path = unique_path(&dir, &safe_stem(&note.title));
+        // CRLF, because the file is written for whatever the user opens it in on
+        // Windows rather than for this program.
+        let body = note.markdown.replace("\r\n", "\n").replace('\n', "\r\n");
+        std::fs::write(&path, body).map_err(|err| fail("无法写入导出文件", err))?;
+    }
+
+    #[cfg(target_os = "windows")]
+    std::process::Command::new("explorer.exe")
+        .arg(&dir)
+        .spawn()
+        .map_err(|err| fail("无法打开导出目录", err))?;
+
+    Ok(dir.display().to_string())
+}
+
+/// A note title is free text; a Windows filename is not.
+fn safe_stem(title: &str) -> String {
+    let cleaned: String = title
+        .chars()
+        .map(|ch| match ch {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '-',
+            ch if ch.is_control() => ' ',
+            ch => ch,
+        })
+        .collect();
+
+    // Trailing dots and spaces are legal in a string and not in a filename.
+    let trimmed = cleaned.trim().trim_end_matches('.').trim();
+    if trimmed.is_empty() {
+        return "未命名".to_owned();
+    }
+
+    let mut stem: String = trimmed.chars().take(60).collect();
+    stem = stem.trim().to_owned();
+
+    // `CON`, `NUL`, `COM1`… stay device names even with an extension attached,
+    // and writing to one fails with an error nobody could act on.
+    let upper = stem.to_ascii_uppercase();
+    let device = matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((upper.starts_with("COM") || upper.starts_with("LPT"))
+            && upper.len() == 4
+            && upper.as_bytes()[3].is_ascii_digit());
+    if device {
+        stem.push('_');
+    }
+
+    stem
+}
+
+/// Never overwrites: a second export of the same note lands beside the first.
+fn unique_path(dir: &Path, stem: &str) -> PathBuf {
+    let first = dir.join(format!("{stem}.md"));
+    if !first.exists() {
+        return first;
+    }
+    for n in 2..1000 {
+        let candidate = dir.join(format!("{stem} ({n}).md"));
+        if !candidate.exists() {
+            return candidate;
+        }
+    }
+    dir.join(format!(
+        "{stem} ({}).md",
+        chrono::Local::now().format("%Y%m%d%H%M%S")
+    ))
+}
+
 /// Clicks pass straight through the window. `Ctrl+Shift+K` in the UI is the way
 /// back out — without it the window would be impossible to switch off again.
 #[tauri::command]
@@ -255,6 +354,32 @@ pub fn quit(app: AppHandle) {
     app.exit(0);
 }
 
+/// Whether Windows launches NoteDock at sign-in.
+///
+/// Read from the registry on every call rather than kept in `settings.json`: 任务
+/// 管理器 → 启动 can switch this off without this program ever running, and a
+/// switch that disagrees with the system is worse than no switch at all.
+#[tauri::command]
+pub fn autostart(app: AppHandle) -> CmdResult<bool> {
+    app.autolaunch()
+        .is_enabled()
+        .map_err(|err| fail("无法读取开机自启动设置", err))
+}
+
+/// The registry entry records the path of the exe that wrote it, so turning this on
+/// registers *this* copy — move or reinstall the program and the switch reads off
+/// again, which is the honest answer rather than a stale entry pointing nowhere.
+#[tauri::command]
+pub fn set_autostart(app: AppHandle, enabled: bool) -> CmdResult<()> {
+    let manager = app.autolaunch();
+    if enabled {
+        manager.enable()
+    } else {
+        manager.disable()
+    }
+    .map_err(|err| fail("无法保存开机自启动设置", err))
+}
+
 #[tauri::command]
 pub fn minimize_window(window: WebviewWindow) -> CmdResult<()> {
     window
@@ -262,9 +387,52 @@ pub fn minimize_window(window: WebviewWindow) -> CmdResult<()> {
         .map_err(|err| fail("无法最小化窗口", err))
 }
 
+/// Hides to the tray. Deliberately not a quit.
+///
+/// `skipTaskbar` is on, so this window has no taskbar button: a reflexive click on
+/// × that ended the process would take the tray icon and the sync loop with it and
+/// leave nothing on screen to click. Dismissing is the frequent action and it is
+/// reversible — the tray icon, or its 显示 / 隐藏 item, brings the window back.
+/// Quitting stays where it is deliberate: 设置 and the tray menu.
 #[tauri::command]
-pub fn close_window(window: WebviewWindow) -> CmdResult<()> {
-    window.close().map_err(|err| fail("无法关闭窗口", err))
+pub fn hide_window(window: WebviewWindow) -> CmdResult<()> {
+    window.hide().map_err(|err| fail("无法隐藏窗口", err))
+}
+
+/// Emitted whenever the window's maximized state changes.
+///
+/// An event rather than only a return value: `Win`+`↑` and a double-click on the
+/// drag region both maximize without going through a command, and a button
+/// offering 全屏 on an already-full-screen window is worse than no button.
+pub const MAXIMIZED_EVENT: &str = "notedock:maximized";
+
+/// Fills the screen, or goes back to the floating size. Returns where it landed.
+///
+/// Maximize rather than true fullscreen: this window has no OS chrome and is
+/// normally on top, so covering the taskbar as well would take away the way back
+/// to everything else.
+#[tauri::command]
+pub fn toggle_maximize(window: WebviewWindow) -> CmdResult<bool> {
+    let maximized = window
+        .is_maximized()
+        .map_err(|err| fail("无法读取窗口状态", err))?;
+    if maximized {
+        window
+            .unmaximize()
+            .map_err(|err| fail("无法还原窗口", err))?;
+    } else {
+        window.maximize().map_err(|err| fail("无法全屏", err))?;
+    }
+    Ok(!maximized)
+}
+
+/// Asked once on startup. The window is never maximized when it first opens, but
+/// the webview can be reloaded while it is.
+#[tauri::command]
+pub fn is_maximized(window: WebviewWindow) -> CmdResult<bool> {
+    window
+        .is_maximized()
+        .map_err(|err| fail("无法读取窗口状态", err))
 }
 
 /// Names the session in the server's session list. Best-effort: a machine
@@ -274,4 +442,62 @@ fn hostname_label() -> String {
         .or_else(|_| std::env::var("HOSTNAME"))
         .map(|name| format!("desktop:{name}"))
         .unwrap_or_else(|_| "desktop".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{safe_stem, unique_path};
+
+    #[test]
+    fn stem_keeps_cjk_and_replaces_illegal_characters() {
+        assert_eq!(safe_stem("blender学习"), "blender学习");
+        assert_eq!(safe_stem("2026/09/04 会议"), "2026-09-04 会议");
+        assert_eq!(safe_stem("a:b*c?d\"e<f>g|h"), "a-b-c-d-e-f-g-h");
+    }
+
+    #[test]
+    fn stem_falls_back_when_there_is_nothing_usable() {
+        assert_eq!(safe_stem(""), "未命名");
+        assert_eq!(safe_stem("   "), "未命名");
+        assert_eq!(safe_stem("..."), "未命名");
+    }
+
+    /// A trailing dot is legal in the title and not in the filename.
+    #[test]
+    fn stem_trims_trailing_dots_and_spaces() {
+        assert_eq!(safe_stem("  草稿.  "), "草稿");
+    }
+
+    #[test]
+    fn stem_escapes_windows_device_names() {
+        assert_eq!(safe_stem("CON"), "CON_");
+        assert_eq!(safe_stem("com1"), "com1_");
+        // Not a device: only COM1..COM9 are, so a longer name is left alone.
+        assert_eq!(safe_stem("COM10"), "COM10");
+        assert_eq!(safe_stem("CONTEXT"), "CONTEXT");
+    }
+
+    #[test]
+    fn stem_is_length_capped() {
+        assert_eq!(safe_stem(&"字".repeat(200)).chars().count(), 60);
+    }
+
+    #[test]
+    fn exporting_twice_does_not_overwrite() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let first = unique_path(dir.path(), "笔记");
+        assert_eq!(first.file_name().unwrap(), "笔记.md");
+
+        std::fs::write(&first, "one").expect("write");
+        let second = unique_path(dir.path(), "笔记");
+        assert_eq!(second.file_name().unwrap(), "笔记 (2).md");
+
+        std::fs::write(&second, "two").expect("write");
+        assert_eq!(
+            unique_path(dir.path(), "笔记").file_name().unwrap(),
+            "笔记 (3).md"
+        );
+        // The first export is still there, untouched.
+        assert_eq!(std::fs::read_to_string(&first).expect("read"), "one");
+    }
 }

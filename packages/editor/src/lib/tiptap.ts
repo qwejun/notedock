@@ -1,4 +1,10 @@
-import { Editor, type JSONContent } from "@tiptap/core";
+import {
+  Editor,
+  getSchema,
+  type Extensions,
+  type JSONContent,
+} from "@tiptap/core";
+import type { Schema } from "@tiptap/pm/model";
 import StarterKit from "@tiptap/starter-kit";
 import Collaboration from "@tiptap/extension-collaboration";
 import { Color, TextStyle } from "@tiptap/extension-text-style";
@@ -48,6 +54,47 @@ export function emptyDoc(): JSONContent {
   return { type: "doc", content: [] };
 }
 
+/**
+ * Everything that defines the note *schema*, with the two extensions that need a
+ * live editor left out: Collaboration binds to one document, and Placeholder is
+ * decoration.
+ *
+ * Split out so the schema can be built without mounting an editor — exporting
+ * every note reads documents that no editor is showing.
+ */
+export function noteExtensions(): Extensions {
+  return [
+    // StarterKit in TipTap 3 already bundles Link, Underline, lists, code
+    // blocks and undo history, so those are configured rather than re-added —
+    // adding them twice is a duplicate-extension warning.
+    StarterKit.configure({
+      link: {
+        openOnClick: false,
+        autolink: true,
+        // A note is user-authored content, but it also syncs between devices;
+        // refuse anything that is not a plain web or mail link.
+        protocols: ["http", "https", "mailto"],
+      },
+      heading: { levels: [...HEADING_LEVELS] },
+      // Collaboration brings its own history, backed by the CRDT, so that undo
+      // only ever reverts *your* edits and not a collaborator's.
+      undoRedo: false,
+    }),
+    TextStyle,
+    Color,
+    Highlight.configure({ multicolor: true }),
+    Image.configure({ inline: false, allowBase64: false }),
+  ];
+}
+
+let schema: Schema | undefined;
+
+/** The note schema. Built once: it is derived from constants. */
+export function noteSchema(): Schema {
+  schema ??= getSchema(noteExtensions());
+  return schema;
+}
+
 export interface NoteEditorOptions {
   element: HTMLElement;
   /**
@@ -84,27 +131,8 @@ export function createNoteEditor(options: NoteEditorOptions): Editor {
     // No `content`: the Collaboration extension populates the editor from the
     // Y.Doc. Passing content here would inject a second copy of the document.
     extensions: [
-      // StarterKit in TipTap 3 already bundles Link, Underline, lists, code
-      // blocks and undo history, so those are configured rather than re-added —
-      // adding them twice is a duplicate-extension warning.
-      StarterKit.configure({
-        link: {
-          openOnClick: false,
-          autolink: true,
-          // A note is user-authored content, but it also syncs between devices;
-          // refuse anything that is not a plain web or mail link.
-          protocols: ["http", "https", "mailto"],
-        },
-        heading: { levels: [...HEADING_LEVELS] },
-        // Collaboration brings its own history, backed by the CRDT, so that undo
-        // only ever reverts *your* edits and not a collaborator's.
-        undoRedo: false,
-      }),
+      ...noteExtensions(),
       Collaboration.configure({ fragment: options.session.fragment }),
-      TextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
-      Image.configure({ inline: false, allowBase64: false }),
       Placeholder.configure({
         placeholder: options.placeholder ?? "写点什么…",
       }),

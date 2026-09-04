@@ -1,4 +1,9 @@
-import { NoteSession, type ConnectionState, type NoteSummary } from "@notedock/editor";
+import {
+  exportAll,
+  NoteSession,
+  type ConnectionState,
+  type NoteSummary,
+} from "@notedock/editor";
 import type { SyncState } from "@notedock/editor/generated/desktop";
 import { bridge, reason } from "./bridge";
 
@@ -22,7 +27,12 @@ const OFFLINE: SyncState = {
 export class DesktopStore {
   notes = $state<NoteSummary[]>([]);
   selectedId = $state<string | null>(null);
-  spotlightId = $state<string | null>(null);
+  /**
+   * The note to reopen on the next launch. Written automatically whenever a note
+   * is opened, so the window always comes back to whatever was last being
+   * written — there is nothing here for the user to decide or maintain.
+   */
+  reopenId = $state<string | null>(null);
 
   /** The open note's document. Replacing it is what makes the editor rebind. */
   session = $state<NoteSession | null>(null);
@@ -33,16 +43,32 @@ export class DesktopStore {
   /** The document socket, which is what the sync dot actually reflects. */
   connection = $state<ConnectionState>("offline");
   error = $state<string | null>(null);
+  /** Transient confirmation, e.g. where an export landed. Clears itself. */
+  notice = $state<string | null>(null);
+  #noticeTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * True while an export is walking the note list. Exposed because that walk
+   * waits on one socket per note, which is long enough that the button has to
+   * stop accepting a second click.
+   */
+  exporting = $state(false);
 
   opacity = $state(1);
   alwaysOnTop = $state(true);
+  /**
+   * Whether the window is filling the screen. Deliberately not persisted: a
+   * notepad you summon should come back the size you can see past.
+   */
+  maximized = $state(false);
   /** Not persisted on purpose: a window that starts click-through is a trap. */
   clickThrough = $state(false);
+  /**
+   * Whether Windows launches the app at sign-in. Not one of the window prefs
+   * because it does not live in `settings.json` — the registry owns it, and the
+   * user can change it from 任务管理器 → 启动 without this program running.
+   */
+  autostart = $state(false);
   info = $state<Awaited<ReturnType<typeof bridge.appInfo>> | null>(null);
-
-  get hasSelection(): boolean {
-    return this.session !== null;
-  }
 
   /**
    * What the dot shows.
@@ -61,34 +87,41 @@ export class DesktopStore {
   }
 
   async init(): Promise<() => void> {
-    const unlisten = await bridge.onSync((state) => {
+    const offSync = await bridge.onSync((state) => {
       this.sync = state;
       void this.#reconcile();
+    });
+    const offMaximized = await bridge.onMaximized((maximized) => {
+      this.maximized = maximized;
     });
 
     try {
       this.sync = await bridge.syncState();
-      this.spotlightId = await bridge.getSpotlight();
+      this.reopenId = await bridge.getSpotlight();
       const prefs = await bridge.windowPrefs();
       this.opacity = prefs.opacity;
       this.alwaysOnTop = prefs.always_on_top;
+      this.maximized = await bridge.isMaximized();
       await this.refresh();
     } catch (error) {
       this.error = reason(error);
     }
 
-    return unlisten;
+    return () => {
+      offSync();
+      offMaximized();
+    };
   }
 
   async refresh(): Promise<void> {
     try {
       this.notes = await bridge.listNotes();
       if (!this.selectedId) {
-        // Prefer the note pinned in settings; otherwise the most recent one. A
-        // floating notepad that opens to nothing has wasted the summon.
+        // Reopen the note this window was last on; otherwise the most recent
+        // one. A floating notepad that opens to nothing has wasted the summon.
         const preferred =
-          this.spotlightId && this.notes.some((note) => note.id === this.spotlightId)
-            ? this.spotlightId
+          this.reopenId && this.notes.some((note) => note.id === this.reopenId)
+            ? this.reopenId
             : this.notes[0]?.id;
         if (preferred) this.open(preferred);
       }
@@ -148,6 +181,12 @@ export class DesktopStore {
     this.selectedId = id;
     this.session = session;
     this.title = title;
+
+    // Remembered here rather than behind a toggle: the note you were last in is
+    // the one you want back, and asking the user to pin it is asking them to do
+    // the program's bookkeeping.
+    this.reopenId = id;
+    void bridge.setSpotlight(id).catch((error) => (this.error = reason(error)));
   }
 
   renameTitle(title: string): void {
@@ -183,15 +222,45 @@ export class DesktopStore {
     }
   }
 
-  async toggleSpotlight(): Promise<void> {
-    if (!this.selectedId) return;
-    const next = this.spotlightId === this.selectedId ? null : this.selectedId;
+  /**
+   * Writes every note out as Markdown.
+   *
+   * Bodies are Yjs documents, so this is not a query over the note list: each
+   * note has to be brought up to date before it can be read. {@link exportAll}
+   * does that one note at a time and reuses the open one, which is why this
+   * reports progress — it waits on the network once per note.
+   */
+  async exportNotes(): Promise<void> {
+    if (this.exporting || this.notes.length === 0) return;
+    this.exporting = true;
+    // A pending announce from a previous export would otherwise blank the
+    // progress line partway through this one.
+    clearTimeout(this.#noticeTimer);
     try {
-      await bridge.setSpotlight(next);
-      this.spotlightId = next;
+      const files = await exportAll({
+        notes: this.notes,
+        live: this.session,
+        ticket: () => bridge.wsUrl(),
+        cacheKey: (id) => `notedock:${id}`,
+        onProgress: (done, total) => {
+          this.notice = `正在导出 ${done}/${total} 篇…`;
+        },
+      });
+      const dir = await bridge.exportNotes(files);
+      this.#announce(`已导出 ${files.length} 篇到 ${dir}`);
     } catch (error) {
+      this.notice = null;
       this.error = reason(error);
+    } finally {
+      this.exporting = false;
     }
+  }
+
+  /** A banner that needs dismissing is one more thing to click. */
+  #announce(text: string): void {
+    this.notice = text;
+    clearTimeout(this.#noticeTimer);
+    this.#noticeTimer = setTimeout(() => (this.notice = null), 8000);
   }
 
   /** Live preview while the slider moves; nothing is written to disk yet. */
@@ -214,6 +283,21 @@ export class DesktopStore {
     try {
       await bridge.setAlwaysOnTop(next);
       this.alwaysOnTop = next;
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  /**
+   * Fills the screen, or goes back to the floating size.
+   *
+   * Rust owns the truth here: it reads the real window state before flipping it,
+   * so this stays correct even if the window was snapped full-screen by Windows
+   * behind the UI's back.
+   */
+  async toggleMaximize(): Promise<void> {
+    try {
+      this.maximized = await bridge.toggleMaximize();
     } catch (error) {
       this.error = reason(error);
     }
@@ -265,6 +349,31 @@ export class DesktopStore {
     } catch (error) {
       this.error = reason(error);
     }
+  }
+
+  /**
+   * Re-reads the autostart switch. Unlike {@link loadInfo} this is not cached:
+   * the registry is the source of truth and something outside this program may
+   * have changed it since the panel was last opened.
+   */
+  async loadAutostart(): Promise<void> {
+    try {
+      this.autostart = await bridge.autostart();
+    } catch (error) {
+      this.error = reason(error);
+    }
+  }
+
+  async toggleAutostart(): Promise<void> {
+    try {
+      await bridge.setAutostart(!this.autostart);
+    } catch (error) {
+      this.error = reason(error);
+    }
+    // Read back rather than assume: this writes to the registry, and a switch that
+    // flipped in the UI while the write failed would be a lie about what happens
+    // at the next sign-in.
+    await this.loadAutostart();
   }
 
   #close(): void {

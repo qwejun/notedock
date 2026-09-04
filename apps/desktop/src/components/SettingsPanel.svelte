@@ -6,12 +6,10 @@
   interface Props {
     open: boolean;
     store: DesktopStore;
-    /** Opening the command palette belongs to the window, not to this panel. */
-    onSearch: () => void;
     onClose: () => void;
   }
 
-  let { open, store, onSearch, onClose }: Props = $props();
+  let { open, store, onClose }: Props = $props();
 
   let panel = $state<HTMLDivElement>();
 
@@ -21,25 +19,33 @@
     offline: "离线",
   } as const;
 
-  /** Only a note that is actually open can be pinned to the window. */
-  const canSpotlight = $derived(store.hasSelection);
-  const spotlit = $derived(
-    store.selectedId !== null && store.selectedId === store.spotlightId,
-  );
   const percent = $derived(Math.round(store.opacity * 100));
+  const canExport = $derived(store.notes.length > 0 && !store.exporting);
 
   $effect(() => {
     if (!open) return;
     void store.loadInfo();
+    // Not cached like the app info: the registry is what decides this, and 任务
+    // 管理器 can have turned it off since the last time the panel was open.
+    void store.loadAutostart();
     // Focus the sheet so Escape and Tab land inside it rather than in the editor
     // underneath.
     requestAnimationFrame(() => panel?.focus());
   });
 
-  /** Runs an action and closes, for the rows that are one-shot commands. */
+  /** Runs an action and closes, for the ones that leave nothing to look at. */
   function act(run: () => void): void {
     run();
     onClose();
+  }
+
+  /*
+   * Closes first, deliberately. The export walks every note over its own socket,
+   * so it reports progress in the window's own banner — which is behind this
+   * sheet.
+   */
+  function startExport(): void {
+    act(() => void store.exportNotes());
   }
 </script>
 
@@ -76,11 +82,33 @@
       </header>
 
       <div class="body">
+        <!-- First, because when the program runs comes before how its window
+             behaves. One row today; anything else about launching belongs here. -->
+        <section aria-labelledby="nd-set-launch">
+          <h2 id="nd-set-launch">启动</h2>
+
+          <div class="field">
+            <span class="text">
+              <span class="name" id="nd-autostart">开机自启动</span>
+              <span class="note">登录 Windows 后自动打开，回到上次那篇笔记</span>
+            </span>
+            <button
+              class="switch"
+              role="switch"
+              aria-checked={store.autostart}
+              aria-labelledby="nd-autostart"
+              onclick={() => void store.toggleAutostart()}
+            ><span class="knob"></span></button>
+          </div>
+        </section>
+
         <section aria-labelledby="nd-set-window">
           <h2 id="nd-set-window">窗口</h2>
 
-          <div class="row">
-            <label class="label" for="nd-opacity">不透明度</label>
+          <div class="field field--stack">
+            <label class="text" for="nd-opacity">
+              <span class="name">不透明度</span>
+            </label>
             <span class="value">{percent}%</span>
             <input
               id="nd-opacity"
@@ -90,14 +118,18 @@
               max="1"
               step="0.05"
               value={store.opacity}
-              oninput={(event) => store.previewOpacity(Number(event.currentTarget.value))}
-              onchange={(event) => void store.commitOpacity(Number(event.currentTarget.value))}
+              oninput={(event) =>
+                store.previewOpacity(Number(event.currentTarget.value))}
+              onchange={(event) =>
+                void store.commitOpacity(Number(event.currentTarget.value))}
             />
           </div>
 
-          <div class="row">
-            <span class="label" id="nd-ontop">窗口置顶</span>
-            <span class="hint">浮在其他窗口之上</span>
+          <div class="field">
+            <span class="text">
+              <span class="name" id="nd-ontop">窗口置顶</span>
+              <span class="note">浮在其他窗口之上</span>
+            </span>
             <button
               class="switch"
               role="switch"
@@ -107,9 +139,11 @@
             ><span class="knob"></span></button>
           </div>
 
-          <div class="row">
-            <span class="label" id="nd-through">点击穿透</span>
-            <span class="hint">鼠标穿过窗口，Ctrl+Shift+K 也可切换</span>
+          <div class="field">
+            <span class="text">
+              <span class="name" id="nd-through">点击穿透</span>
+              <span class="note">鼠标穿过窗口 · Ctrl+Shift+K 切换</span>
+            </span>
             <button
               class="switch"
               role="switch"
@@ -120,88 +154,73 @@
           </div>
         </section>
 
-        <section aria-labelledby="nd-set-notes">
-          <h2 id="nd-set-notes">笔记</h2>
-
-          {#if canSpotlight}
-            <div class="row">
-              <span class="label" id="nd-spot">桌面置顶这篇</span>
-              <span class="hint">下次启动直接打开它</span>
-              <button
-                class="switch"
-                role="switch"
-                aria-checked={spotlit}
-                aria-labelledby="nd-spot"
-                onclick={() => void store.toggleSpotlight()}
-              ><span class="knob"></span></button>
-            </div>
-          {/if}
-
-          <button class="action" onclick={() => act(() => void store.create())}>
-            <Icon name="plus" size={14} />
-            <span class="label">新建笔记</span>
-          </button>
-
-          <button class="action" onclick={() => act(onSearch)}>
-            <Icon name="search" size={14} />
-            <span class="label">搜索并切换笔记</span>
-          </button>
-        </section>
-
         <section aria-labelledby="nd-set-sync">
           <h2 id="nd-set-sync">同步</h2>
 
-          <div class="row">
-            <span class="label">服务器</span>
-            <span class="mono" title={store.sync.server_url}>
-              {store.sync.server_url || "未连接"}
+          <div class="field">
+            <span class="text">
+              <span class="name">状态</span>
+              <span class="note mono" title={store.sync.server_url}>
+                {store.sync.server_url || "未连接"}
+              </span>
             </span>
-          </div>
-
-          <div class="row">
-            <span class="label">状态</span>
-            <span class="status">
+            <span class="state">
               <SyncDot status={store.status} />
               <span>{SYNC_LABELS[store.status]}</span>
-              {#if store.sync.pending > 0}
-                <span class="hint">{store.sync.pending} 处待上传</span>
-              {/if}
             </span>
           </div>
 
-          <button class="action" onclick={() => void store.syncNow()}>
-            <span class="label">立即同步</span>
-          </button>
+          {#if store.sync.pending > 0}
+            <div class="field">
+              <span class="text"><span class="name">待上传</span></span>
+              <span class="value">{store.sync.pending} 处改动</span>
+            </div>
+          {/if}
 
-          <button class="action" onclick={() => act(() => void store.logout())}>
-            <span class="label">退出登录</span>
-            <span class="hint">本地笔记保留</span>
-          </button>
+          <div class="field">
+            <span class="text">
+              <span class="name">退出登录</span>
+              <span class="note">本地笔记保留</span>
+            </span>
+            <button
+              class="btn danger"
+              onclick={() => act(() => void store.logout())}>退出</button
+            >
+          </div>
         </section>
 
-        <section aria-labelledby="nd-set-about">
-          <h2 id="nd-set-about">关于</h2>
+        <section aria-labelledby="nd-set-data">
+          <h2 id="nd-set-data">数据</h2>
 
-          <div class="row">
-            <span class="label">版本</span>
-            <span class="mono">{store.info?.version ?? "…"}</span>
+          <div class="field" class:off={!canExport}>
+            <span class="text">
+              <span class="name">导出全部笔记</span>
+              <span class="note">
+                {store.notes.length} 篇 · Markdown，存到 文档\NoteDock\
+              </span>
+            </span>
+            <button class="btn" disabled={!canExport} onclick={startExport}>
+              {store.exporting ? "导出中…" : "导出"}
+            </button>
           </div>
+        </section>
 
-          <div class="row stacked">
-            <span class="label">本地数据</span>
-            <!-- Worth surfacing: this is where the offline cache and the bearer
-                 token live, and nobody should have to guess. -->
+        <!-- Reference, not settings: kept at the bottom and visually quieter so
+             it stops competing with the controls above. The version goes last of
+             all — it is what you come here to read when something is wrong, and
+             the bottom of the sheet is where you look for it. -->
+        <footer>
+          <button class="btn danger quit" onclick={() => void bridge.quit()}>
+            <Icon name="close" size={13} />
+            退出 NoteDock
+          </button>
+          <div class="meta">
+            <span class="version">版本 {store.info?.version ?? "…"}</span>
             <span class="mono path" title={store.info?.data_dir ?? ""}>
               {store.info?.data_dir ?? "…"}
             </span>
           </div>
-
-        </section>
-
-        <button class="action danger" onclick={() => void bridge.quit()}>
-          <Icon name="close" size={14} />
-          <span class="label">退出 NoteDock</span>
-        </button>
+        </footer>
       </div>
     </div>
   </div>
@@ -216,11 +235,8 @@
     background: rgb(0 0 0 / 30%);
   }
 
-  /*
-   * Fills the window rather than floating as a popover: at the 250×200 minimum
-   * there is no room for an anchored dropdown, and a full sheet that scrolls
-   * behaves the same at every size.
-   */
+  /* A full sheet rather than an anchored popover: the window can be 250px wide,
+     which leaves no room for a dropdown to hang off anything. */
   .sheet {
     display: flex;
     flex-direction: column;
@@ -229,128 +245,187 @@
     outline: none;
   }
 
+  /* Same height as the title bar it covers, so opening settings does not shift
+     the content baseline. */
   header {
     display: flex;
+    flex: none;
     align-items: center;
     justify-content: space-between;
-    flex: none;
-    height: 28px;
-    padding: 0 calc(var(--nd-space) * 2);
+    height: 48px;
+    padding: 0 calc(var(--nd-space) * 3);
     border-bottom: 1px solid var(--nd-border);
   }
 
   .heading {
-    padding-left: calc(var(--nd-space) * 1.5);
-    font-size: var(--nd-text-xs);
-    font-weight: 600;
-    color: var(--nd-fg-dim);
+    font-size: var(--nd-text-sm);
+    font-weight: 700;
+    color: var(--nd-fg);
   }
 
   .body {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
-    padding: calc(var(--nd-space) * 2);
+    padding: calc(var(--nd-space) * 3);
   }
 
-  section {
-    margin-bottom: calc(var(--nd-space) * 3);
+  /* Full screen the window is 1920px wide, and a row with its label against one
+     edge and its switch against the other is unreadable. Cap the column and centre
+     it — the scrollbar stays at the window edge, and at 400px nothing moves. */
+  section,
+  footer {
+    max-width: 620px;
+    margin-inline: auto;
+  }
+
+  section + section {
+    margin-top: calc(var(--nd-space) * 4);
   }
 
   h2 {
     margin: 0 0 var(--nd-space);
-    padding: 0 calc(var(--nd-space) * 1.5);
+    padding: 0 calc(var(--nd-space) * 2);
     color: var(--nd-fg-faint);
     font-size: var(--nd-text-xs);
     font-weight: 600;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
   }
 
-  /* Rows wrap so a long label plus a control never forces sideways scrolling in
-   * a 250px window. */
-  .row,
-  .action {
-    display: flex;
+  /* One anatomy for every row: text on the left, exactly one control on the
+     right. A grid, not flex-wrap, so the control keeps its own column and never
+     drops underneath the label when a CJK hint runs long. */
+  .field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
-    flex-wrap: wrap;
     gap: calc(var(--nd-space) * 2);
-    width: 100%;
-    padding: calc(var(--nd-space) * 1.5);
-    border: none;
+    padding: calc(var(--nd-space) * 2);
     border-radius: var(--nd-radius-sm);
-    background: none;
-    color: var(--nd-fg);
-    font: inherit;
     font-size: var(--nd-text-sm);
-    text-align: left;
   }
 
-  .action {
-    cursor: pointer;
+  /* The slider needs the full width, so it takes a second row of its own. */
+  .field--stack .slider {
+    grid-column: 1 / -1;
+    margin-top: var(--nd-space);
   }
 
-  .action:hover {
-    background: var(--nd-bg-hover);
-  }
-
-  .action.danger:hover {
-    color: var(--nd-danger);
-  }
-
-  .row.stacked {
+  .text {
+    display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-  }
-
-  .label {
-    flex: 1;
+    gap: 1px;
     min-width: 0;
   }
 
-  .hint {
-    flex: none;
-    color: var(--nd-fg-faint);
-    font-size: var(--nd-text-xs);
+  .name {
+    color: var(--nd-fg);
   }
 
+  /* Tighter than --nd-leading: two stacked lines, not prose. */
+  .note {
+    color: var(--nd-fg-faint);
+    font-size: var(--nd-text-xs);
+    line-height: 1.45;
+  }
+
+  .off .name {
+    color: var(--nd-fg-dim);
+  }
+
+  /* Read-only values: dimmer and never interactive-looking. */
   .value {
-    flex: none;
     color: var(--nd-fg-dim);
     font-size: var(--nd-text-xs);
     font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  .state {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--nd-space) * 1.5);
+    color: var(--nd-fg-dim);
+    font-size: var(--nd-text-xs);
+    white-space: nowrap;
   }
 
   .mono {
-    flex: none;
-    max-width: 100%;
-    overflow: hidden;
-    color: var(--nd-fg-dim);
     font-family: var(--nd-font-mono);
-    font-size: var(--nd-text-xs);
+    overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  /* A path is the one thing worth breaking across lines instead of truncating. */
   .path {
     white-space: normal;
     overflow-wrap: anywhere;
   }
 
-  .status {
-    display: flex;
+  .slider {
+    width: 100%;
+    accent-color: var(--nd-accent);
+  }
+
+  /* Bordered, so an action is legible as pressable without hovering it first —
+     the old rows were indistinguishable from the read-only ones. */
+  .btn {
+    display: inline-flex;
+    flex: none;
     align-items: center;
+    justify-content: center;
     gap: calc(var(--nd-space) * 1.5);
+    height: 26px;
+    padding: 0 calc(var(--nd-space) * 2.5);
+    border: 1px solid var(--nd-border-strong);
+    border-radius: var(--nd-radius-sm);
+    background: none;
+    color: var(--nd-fg);
+    font: inherit;
     font-size: var(--nd-text-xs);
+    cursor: pointer;
+    transition: background var(--nd-duration) var(--nd-ease);
+  }
+
+  .btn:hover:not(:disabled) {
+    background: var(--nd-bg-hover);
+  }
+
+  .btn:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  .btn.danger {
+    color: var(--nd-danger);
+  }
+
+  footer {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--nd-space) * 2);
+    margin-top: calc(var(--nd-space) * 4);
+    padding: calc(var(--nd-space) * 3) calc(var(--nd-space) * 2) 0;
+    border-top: 1px solid var(--nd-border);
+  }
+
+  .meta {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    color: var(--nd-fg-faint);
+    font-size: var(--nd-text-xs);
+  }
+
+  /* One step brighter than the path beside it: the version is the line people are
+     actually sent here to read. */
+  .version {
     color: var(--nd-fg-dim);
   }
 
-  .slider {
-    /* Own line below the label, so the label can keep its full width. */
-    flex-basis: 100%;
-    accent-color: var(--nd-accent);
-    cursor: pointer;
+  .quit {
+    width: 100%;
+    height: 30px;
   }
 
   .switch {
@@ -359,34 +434,29 @@
     width: 30px;
     height: 18px;
     padding: 0;
-    border: 1px solid var(--nd-border-strong);
+    border: none;
     border-radius: 999px;
-    background: var(--nd-bg-hover);
+    background: var(--nd-border-strong);
     cursor: pointer;
     transition: background var(--nd-duration) var(--nd-ease);
   }
 
   .switch[aria-checked="true"] {
     background: var(--nd-accent);
-    border-color: transparent;
   }
-
   .knob {
     position: absolute;
-    top: 2px;
-    left: 2px;
+    top: 3px;
+    left: 3px;
     width: 12px;
     height: 12px;
     border-radius: 999px;
-    background: var(--nd-fg-dim);
-    transition:
-      transform var(--nd-duration) var(--nd-ease),
-      background var(--nd-duration) var(--nd-ease);
+    background: #fff;
+    transition: transform var(--nd-duration) var(--nd-ease);
   }
 
   .switch[aria-checked="true"] .knob {
-    background: var(--nd-accent-fg);
     transform: translateX(12px);
   }
-
 </style>
+
